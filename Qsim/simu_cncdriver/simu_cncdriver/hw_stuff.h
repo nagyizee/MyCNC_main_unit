@@ -18,8 +18,7 @@ enum EHWAxisPower
 
 
 // Always update from the real hw_stuff.h
-#define SYSTEM_T_10MS_COUNT      20             // 10ms is 40 timer ticks
-#define SYSTEM_MAX_TICK          4000           // timer ticks per second  ( 250us )
+#define SYSTEM_T_10MS_COUNT      200            // 50us timer tick -> 200 ticks -> 10ms
 
 #define TIMER_SYSTEM            TIM1
 

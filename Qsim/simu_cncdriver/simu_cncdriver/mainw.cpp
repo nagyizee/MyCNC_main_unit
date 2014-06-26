@@ -10,7 +10,7 @@
 
 // timing - 50us timer interrupt -> obtaining 100us clock -> 10kHz -> 25mm/sec -> 1500mm/min max
 #define TIMER_INTERVAL          40       // 40ms -> 25 fps
-#define TICKS_TO_SIMULATE       800      // 800 timer cycles to be simulated for 40ms
+#define TICKS_TO_SIMULATE       2000      // 800 timer cycles to be simulated for 40ms
 
 
 mainw::mainw(QWidget *parent) :
@@ -19,6 +19,8 @@ mainw::mainw(QWidget *parent) :
 {
     ui->setupUi(this);
     HW_wrapper_setup( TIMER_INTERVAL );
+
+    memset( buttons, 0, sizeof(bool)*3 );
 
     // set up the graphic display simulator
     gmem_xy    = (uchar*)malloc( DISPSIM_MAX_W * DISPSIM_MAX_H * 3 );
@@ -85,7 +87,7 @@ void mainw::TimerTick()
         bool    send_tick   = true;
         int     loop;
 
-        loop = (qrand() & 0x03) + 1; // it can make 1 - 3 main loops
+        loop = (qrand() & 0x03); // it can make 1 - 3 main loops
 
         for ( j=0; j<loop; j++ )
         {
@@ -103,4 +105,94 @@ void mainw::TimerTick()
 /////////////////////////////////////////////////////////////
 // UI elements
 /////////////////////////////////////////////////////////////
+
+
+void mainw::on_pb_pause_pressed()
+{
+    buttons[0] = true;
+}
+
+void mainw::on_pb_pause_released()
+{
+    buttons[0] = false;
+}
+
+void mainw::on_pb_resume_pressed()
+{
+    buttons[1] = true;
+}
+
+void mainw::on_pb_resume_released()
+{
+    buttons[1] = false;
+}
+
+void mainw::on_pb_home_pressed()
+{
+    buttons[2] = true;
+}
+
+void mainw::on_pb_home_released()
+{
+    buttons[2] = false;
+}
+
+void mainw::on_nm_real_x_valueChanged(double arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_X, true, arg1, 0 );
+}
+
+void mainw::on_nm_real_y_valueChanged(double arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_Y, true, arg1, 0 );
+}
+
+void mainw::on_nm_real_z_valueChanged(double arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_Z, true, arg1, 0 );
+}
+
+void mainw::on_nm_real_a_valueChanged(double arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_A, true, arg1, 0 );
+}
+
+
+void mainw::on_nm_rotor_x_valueChanged(int arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_X, false, 0, arg1 );
+}
+
+void mainw::on_nm_rotor_y_valueChanged(int arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_Y, false, 0, arg1 );
+}
+
+void mainw::on_nm_rotor_z_valueChanged(int arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_Z, false, 0, arg1 );
+}
+
+void mainw::on_nm_rotor_a_valueChanged(int arg1)
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        HW_wrp_setcoord( COORD_A, false, 0, arg1 );
+}
+
+
+void mainw::on_pb_bloc_execution_clicked()
+{
+    if ( ui->pb_bloc_execution->isChecked() )
+        ticktimer->stop();
+    else
+        ticktimer->start();
+
+}
 

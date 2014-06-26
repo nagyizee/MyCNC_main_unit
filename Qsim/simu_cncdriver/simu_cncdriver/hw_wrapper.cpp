@@ -23,6 +23,7 @@ uint8 eeprom_cont[ EEPROM_SIZE ];
 
 
 struct SStepCoordinates hw_coords;
+bool dirs[CNC_MAX_COORDS] = { false, };
 
 
 void InitHW(void)
@@ -54,69 +55,86 @@ void LED_Off( int i )
 
 bool BtnGet_Emerg()
 {
-    return false;
+    return pClass->HW_wrapper_button_state(0);
 }
 
 bool BtnGet_Resume()
 {
-    return false;
+    return pClass->HW_wrapper_button_state(1);
 }
 
 bool BtnGet_Home()
 {
-    return false;
+    return pClass->HW_wrapper_button_state(2);
 }
 
 void HW_SetDirX_Plus()
 {
+    dirs[COORD_X] = true;
 }
 
 void HW_SetDirX_Minus()
 {
+    dirs[COORD_X] = false;
 }
 
 void HW_SetDirY_Plus()
 {
+    dirs[COORD_Y] = true;
 }
 
 void HW_SetDirY_Minus()
 {
+    dirs[COORD_Y] = false;
 }
 
 void HW_SetDirZ_Plus()
 {
+    dirs[COORD_Z] = true;
 }
 
 void HW_SetDirZ_Minus()
 {
+    dirs[COORD_Z] = false;
 }
 
 void HW_SetDirA_Plus()
 {
+    dirs[COORD_A] = true;
 }
 
 void HW_SetDirA_Minus()
 {
+    dirs[COORD_A] = false;
 }
 
 void HW_StepClk_X()
 {
+    hw_coords.coord[COORD_X] += dirs[COORD_X] ? 1 : -1;
+    pClass->dispsim_add_point();
 }
 
 void HW_StepClk_Y()
 {
+    hw_coords.coord[COORD_Y] += dirs[COORD_Y] ? 1 : -1;
+    pClass->dispsim_add_point();
 }
 
 void HW_StepClk_Z()
 {
+    hw_coords.coord[COORD_Z] += dirs[COORD_Z] ? 1 : -1;
+    pClass->dispsim_add_point();
 }
 
 void HW_StepClk_A()
 {
+    hw_coords.coord[COORD_A] += dirs[COORD_A] ? 1 : -1;
+    pClass->dispsim_add_point();
 }
 
 void HW_StepClk_Reset()
 {
+    //dummy
 }
 
 
@@ -170,11 +188,29 @@ void mainw::HW_wrapper_LED( int led, bool on )
 }
 
 
+bool mainw::HW_wrapper_button_state(int button)
+{
+    return buttons[button];
+}
+
+
 void mainw::HW_wrapper_update_display( void )
 {
     Disp_Redraw();
 
 }
+
+
+void mainw::HW_wrp_setcoord( int coord, bool num, double num_val, int step_val )
+{
+    if (num)
+        hw_coords.coord[coord] = (TStepCoord)( num_val * 400 );
+    else
+        hw_coords.coord[coord] = step_val;
+
+    Disp_Redraw();
+}
+
 
 /////////////////////////////////////////////////////
 // Display simulation
@@ -182,6 +218,20 @@ void mainw::HW_wrapper_update_display( void )
 
 void mainw::dispsim_mem_clean()
 {
+    memset( gmem_xy, 0, DISPSIM_MAX_W * DISPSIM_MAX_H *3 );
+}
+
+
+void mainw::dispsim_add_point()
+{
+    uint32 mempoz;
+    mempoz = 3 * ( (hw_coords.coord[COORD_X] / 40) + (460 - hw_coords.coord[COORD_Y] / 40) * DISPSIM_MAX_W );
+    if ( (mempoz + 2) >= DISPSIM_MAX_W * DISPSIM_MAX_H *3 )
+        return;
+
+    gmem_xy[ mempoz ] = 0x50;
+    gmem_xy[ mempoz + 1 ] = 0xff;
+    gmem_xy[ mempoz + 2 ] = 0x30;
 }
 
 
@@ -189,7 +239,6 @@ void mainw::Disp_Redraw()
 {
     int x,y;
 
-    memset( gmem_xy, 0, DISPSIM_MAX_W * DISPSIM_MAX_H *3 );
 
     QImage image( gmem_xy, DISPSIM_MAX_W, DISPSIM_MAX_H, DISPSIM_MAX_W * 3, QImage::Format_RGB888 );
 
@@ -216,5 +265,4 @@ void mainw::Disp_Redraw()
     ui->nm_real_y->setValue( hw_coords.coord[COORD_Y] / 400.0 );
     ui->nm_real_z->setValue( hw_coords.coord[COORD_Z] / 400.0 );
     ui->nm_real_a->setValue( hw_coords.coord[COORD_A] / 400.0 );
-
 }

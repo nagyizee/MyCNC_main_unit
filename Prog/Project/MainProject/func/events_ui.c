@@ -187,13 +187,13 @@ void StepTimerIntrHandler (void)
 /////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////
 
-uint32  GetStepQ( void )
+uint32  stepper_getQ( void )
 {
     return AxisControl.c;
 }
 
 
-uint32 ClearStepQ( void )
+uint32 stepper_clearQ( void )
 {
     uint32  stepsInQ;
     __disable_interrupt();
@@ -206,7 +206,7 @@ uint32 ClearStepQ( void )
     return stepsInQ;
 }
 
-uint32  InsertClock( uint32 tick, uint32 dir )        // clock and dir are bitfields with the 4 axis
+uint32  stepper_insert_clock( uint32 tick, uint32 dir )        // clock and dir are bitfields with the 4 axis
 {
     __disable_interrupt();
     if ( AxisControl.c == MAX_ISR_STEPS )
@@ -225,14 +225,14 @@ uint32  InsertClock( uint32 tick, uint32 dir )        // clock and dir are bitfi
 }
 
 
-void    StepCounter_Setup( struct SStepCoordinates *coord )
+void    stepper_set_coord( struct SStepCoordinates *coord )
 {
     __disable_interrupt();
     AxisControl.Poz = *coord;
     __enable_interrupt();
 }
 
-void    StepCounter_Get( struct SStepCoordinates *coord )
+void    stepper_get_coord( struct SStepCoordinates *coord )
 {
     __disable_interrupt();
     *coord  = AxisControl.Poz;

@@ -13,6 +13,21 @@
     #define COORD_Z             2
     #define COORD_A             3
 
+    #define STEP_X          ( 1 << COORD_X )
+    #define STEP_Y          ( 1 << COORD_Y )
+    #define STEP_Z          ( 1 << COORD_Z )
+    #define STEP_A          ( 1 << COORD_A )
+
+    #define DIR_X_PLUS          STEP_X
+    #define DIR_Y_PLUS          STEP_Y
+    #define DIR_Z_PLUS          STEP_Z
+    #define DIR_A_PLUS          STEP_A
+
+    #define DIR_X_MINUS         0
+    #define DIR_Y_MINUS         0
+    #define DIR_Z_MINUS         0
+    #define DIR_A_MINUS         0
+
 
     typedef uint32  TStepCoord;
 
