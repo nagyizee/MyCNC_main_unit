@@ -20,13 +20,16 @@ SOURCES += main.cpp\
         mainw.cpp \
     hw_wrapper.cpp \
     ../../../Prog/Project/MainProject/func/events_ui.c \
-    ../../../Prog/Project/MainProject/mainapp.c
+    ../../../Prog/Project/MainProject/mainapp.c \
+    ../../../Prog/Project/MainProject/func/motion_core.c
 
 HEADERS  += mainw.h \
     stm32f10x.h \
     ../../../Prog/Project/MainProject/typedefs.h \
     hw_stuff.h \
     ../../../Prog/Project/MainProject/func/events_ui.h \
-    ../../../Prog/Project/MainProject/func/cnc_defs.h
+    ../../../Prog/Project/MainProject/func/cnc_defs.h \
+    ../../../Prog/Project/MainProject/func/motion_core.h \
+    ../../../Prog/Project/MainProject/func/motion_core_internals.h
 
 FORMS    += mainw.ui

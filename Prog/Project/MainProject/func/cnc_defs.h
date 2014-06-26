@@ -30,6 +30,8 @@
 
 
     typedef uint32  TStepCoord;
+    typedef uint16  TSpindleSpeed;
+    typedef uint16  TFeedSpeed;
 
     struct SStepCoordinates
     {
