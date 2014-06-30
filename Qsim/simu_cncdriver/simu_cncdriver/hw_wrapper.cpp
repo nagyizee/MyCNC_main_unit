@@ -1,5 +1,6 @@
 #include "mainw.h"
 #include "ui_mainw.h"
+#include "motion_core.h"
 #include "cnc_defs.h"
 #include "hw_stuff.h"
 
@@ -265,4 +266,13 @@ void mainw::Disp_Redraw()
     ui->nm_real_y->setValue( hw_coords.coord[COORD_Y] / 400.0 );
     ui->nm_real_z->setValue( hw_coords.coord[COORD_Z] / 400.0 );
     ui->nm_real_a->setValue( hw_coords.coord[COORD_A] / 400.0 );
+
+    SStepCoordinates soft_coord;
+
+    motion_get_crt_coord( &soft_coord );
+    ui->nm_stepx->setValue( soft_coord.coord[COORD_X] );
+    ui->nm_stepy->setValue( soft_coord.coord[COORD_Y] );
+    ui->nm_stepz->setValue( soft_coord.coord[COORD_Z] );
+    ui->nm_stepa->setValue( soft_coord.coord[COORD_A] );
+
 }

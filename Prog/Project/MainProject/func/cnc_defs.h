@@ -8,10 +8,17 @@
 #include "typedefs.h"
 
     #define CNC_MAX_COORDS      4    // 4 coordinates handled, order is: X, Y, Z, A
+    #define CNC_MAX_COORDMASK   0x0f
     #define COORD_X             0
     #define COORD_Y             1
     #define COORD_Z             2
     #define COORD_A             3
+
+    #define MAX_ISR_STEPS       8
+    #define MAX_ISR_WRAPMASK    0x07
+
+    #define STEP_MM             400
+    #define STEP_SEC            10000   // 10kHz step clock - this is the base -> 25rpm -> 25mm/sec -> 1500mm/min
 
     #define STEP_X          ( 1 << COORD_X )
     #define STEP_Y          ( 1 << COORD_Y )

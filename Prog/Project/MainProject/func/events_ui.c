@@ -14,9 +14,6 @@ static struct STIM1 stim;
 static struct STIM1 *TIM1 = &stim;
 #endif
 
-#define MAX_ISR_STEPS       8
-#define MAX_ISR_WRAPMASK    0x07
-
 volatile struct SEventStruct events = { 0, };
 
 

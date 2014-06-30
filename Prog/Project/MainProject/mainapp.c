@@ -72,6 +72,7 @@
 #include <string.h>
 #include "hw_stuff.h"
 #include "events_ui.h"
+#include "motion_core.h"
 
 static uint32 *stack_limit;
 
@@ -95,13 +96,36 @@ static inline void CheckStack(void)
 
 static inline void System_Poll( void )
 {
+    CheckStack();
 
 }
+
+
+struct SStepCoordinates CoordList[] = { { 80*400, 23*400, 60*400, 0 },
+                                        { 129*400+395, 46*400, 80*400, 0 }
+};
 
 
 // Main application routine
 static inline void ProcessApplication( struct SEventStruct *evmask )
 {
+    if ( evmask->button_pressed_resume )
+    {
+        struct SMotionSequence m;
+        m.cmdID = 1;
+        m.seqID = 2;
+        m.seqType = SEQ_TYPE_GOTO;
+        m.params.go_to.feed = mconv_mmpm_2_sps( 300 );
+        m.params.go_to.coord = CoordList[1];
+        motion_sequence_insert( &m );
+        motion_sequence_start();
+    }
+
+
+
+
+
+    motion_poll( evmask );
 
 }
 
@@ -111,6 +135,15 @@ void main_entry( uint32 *stack_top )
     stack_limit = stack_top;
     InitHW();               // init hardware
 
+    motion_init();
+
+    // init
+    struct SStepCoordinates origin;
+    origin.coord[ COORD_X ] = 130*400;
+    origin.coord[ COORD_Y ] = 46*400;
+    origin.coord[ COORD_Z ] = 80*400;
+    origin.coord[ COORD_A ] = 0*400;
+    motion_set_crt_coord( &origin );
 
 }
 

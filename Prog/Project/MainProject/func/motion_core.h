@@ -6,6 +6,7 @@
 #endif
 
     #include "cnc_defs.h"
+    #include "events_ui.h"
 
 
     #define SEQ_TYPE_GOTO       1       // linear motion
@@ -13,11 +14,12 @@
     #define SEQ_TYPE_HOLD       3       // hold time
 
 
+    #define CMD_ID_INVALID         ((uint32)(-1))
+
     struct SMS_Goto
     {
-        TStepCoord coord;           // coordinate to go to
-        TFeedSpeed feed;            // feed speed in steps/sec
-        // TODO: speed difference factor between segments
+        struct SStepCoordinates coord;     // coordinate to go to
+        TFeedSpeed feed;                   // feed speed in steps/sec
     };
 
     struct SMS_Spindle
@@ -50,6 +52,10 @@
     // Init motion core
     void motion_init( void );
 
+    // Main polling loop
+    void motion_poll( struct SEventStruct *evt );
+
+
     // Set axis power. power can have the following values:
     //  0 - power off
     //  1-4 power level.    4 is the maximum
@@ -73,7 +79,7 @@
     // execute a single step on an axis
     // if maximum points are not initted - it will go without boundaries
     // routine is synchronous - will wait till step fifo is emptied -> can not generate high frequency stepping
-    void motion_step( uint32 axis, uint32 dir );
+    int motion_step( uint32 axis, uint32 dir );
 
 
 
@@ -83,8 +89,8 @@
     // Call motion_spindle_is_ok() for busy state
     void motion_spindle( TSpindleSpeed speed );
 
-    // Scale the spindle speed with +/- factor. Value is 0 - 100.
-    // 0 - no scale, +100 - speed up with x5, -100 - speed down with x5
+    // Scale the spindle speed with +/- factor. Value is 0 - 500.
+    // 0 - no scale, +500 - speed up with x5, -500 - speed down with x5
     // it applies the factor in progressive way, no need to wait for it
     void motion_spindle_scale( int factor );
 
@@ -94,8 +100,35 @@
 
 
     // insert a motion sequence in the sequence fifo
-    int motion_insert_sequence( struct SMotionSequence *seq );
+    int motion_sequence_insert( struct SMotionSequence *seq );
 
+    // start motion sequence - if queue is empty it will wait for new sequence insertion,
+    // when sequence is inserted it will run it right away
+    void motion_sequence_start( void );
+
+    // stop motion sequence - will produce an immediate halt if motion is in execution
+    // step fifo is flushed, soft coordinates are updated from hard coordinates
+    void motion_sequence_stop( void );
+
+    // clean up the sequence and motion fifos, if motion is in run it will stop it
+    // flushes both step and sequence fifos, soft coordinates are updated from hard coordinates
+    void motion_sequence_flush( void );
+
+    // get the current command ID which is in execution, or the last command ID which was interrupted
+    uint32 motion_sequence_crt_cmdID();
+
+    // get the current sequence ID which is in execution, or the last sequence ID which was interrupted
+    uint32 motion_sequence_crt_seqID();
+
+
+    // Scale the feed speed with +/- factor. Value is 0 - 500.
+    // 0 - no scale, +500 - speed up with x5, -500 - speed down with x5
+    // it applies the factor in progressive way, no need to wait for it
+    void motion_feed_scale( int factor );
+
+
+    // Utility routine - it converts mm/min to steps/sec
+    TSpindleSpeed mconv_mmpm_2_sps( uint32 feed_mmpm );
 
 
 
