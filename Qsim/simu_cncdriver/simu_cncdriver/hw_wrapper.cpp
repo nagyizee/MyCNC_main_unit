@@ -17,7 +17,6 @@ int tiv;
 #define EEPROM_SIZE     0x200
 
 char line[MAX_LINES*MAX_COLOUMNS];
-static bool disp_changed = false;
 /////////////////////////////////
 
 uint8 eeprom_cont[ EEPROM_SIZE ];
@@ -238,9 +237,6 @@ void mainw::dispsim_add_point()
 
 void mainw::Disp_Redraw()
 {
-    int x,y;
-
-
     QImage image( gmem_xy, DISPSIM_MAX_W, DISPSIM_MAX_H, DISPSIM_MAX_W * 3, QImage::Format_RGB888 );
 
     scene_xy->removeItem(G_item_xy);

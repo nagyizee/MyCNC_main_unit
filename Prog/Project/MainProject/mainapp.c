@@ -101,33 +101,34 @@ static inline void System_Poll( void )
 }
 
 
-struct SStepCoordinates CoordList[] = { { 70*400+395, 23*400, 45*400, 0 },
-                                        { 12*400+395, 40*400, 45*400, 0 },
-                                        { 90*400+395, 12*400, 80*400, 0 },
+struct SStepCoordinates CoordList[] = { { 28000, 9200, 18000, 0 },
+                                        { 20000, 16000, 18000, 0 },
+                                        { 27169, 7777, 32000, 0 },
 };
 
 TFeedSpeed speeds[] = { 300, 250, 1200 };
 
+static int lst = 0;
 
 // Main application routine
 static inline void ProcessApplication( struct SEventStruct *evmask )
 {
-    static int list = 0;
 
     if ( evmask->button_pressed_resume )
     {
         struct SMotionSequence m;
-        m.cmdID = list & 0xff;
+        int str_size = (sizeof(CoordList) / sizeof(struct SStepCoordinates));
+        m.cmdID = lst & 0xff;
         m.seqID = 0;
         m.seqType = SEQ_TYPE_GOTO;
-        m.params.go_to.feed = mconv_mmpm_2_sps( speeds[list] );
-        m.params.go_to.coord = CoordList[list];
+        m.params.go_to.feed = mconv_mmpm_2_sps( speeds[lst] );
+        m.params.go_to.coord = CoordList[lst];
         motion_sequence_insert( &m );
         motion_sequence_start();
 
-        list++;
-        if ( list >= (sizeof(CoordList) - sizeof(struct SStepCoordinates)));
-             list = 0;
+        lst++;
+        if ( lst >= str_size )
+             lst = 0;
 
     }
 

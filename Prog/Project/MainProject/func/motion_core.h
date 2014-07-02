@@ -22,16 +22,6 @@
         TFeedSpeed feed;                   // feed speed in steps/sec
     };
 
-    struct SMS_Spindle
-    {
-        TSpindleSpeed speed;        // spindle speed
-    };
-
-    struct SMS_hold
-    {
-        uint32  ticks;              // 10ms ticks to wait
-    };
-
     // motion sequence element
     struct SMotionSequence
     {
@@ -42,8 +32,9 @@
         union UMS_params
         {
             struct SMS_Goto     go_to;      // for SEQ_TYPE_GOTO
-            struct SMS_Spindle  spindle;    // for SEQ_TYPE_SPINDLE
-            struct SMS_hold     hold;       // for SEQ_TYPE_HOLD
+            TSpindleSpeed       spindle;    // for SEQ_TYPE_SPINDLE
+            uint32              hold;       // for SEQ_TYPE_HOLD
+            // note#0001 : If other parameters are added or current prms are changed in this union, change the code in motion_core.c, search for "note#0001" in the code
         } params;
 
     };

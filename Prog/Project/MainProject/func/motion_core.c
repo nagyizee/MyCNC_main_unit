@@ -1,8 +1,21 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include "motion_core.h"
 #include "motion_core_internals.h"
 #include "events_ui.h"
+
+
+
+#define FP32      32
+#define FP16      16
+
+#define DASSERT(x)      do {   if ( !(x) ) \
+                               {   sprintf( stderr, "Assert: %s\n", # x );\
+                                    while(1);\
+                                }\
+                        } while(0);
 
 
 struct SMotionCoreInternals core;
@@ -20,12 +33,24 @@ struct SMotionCoreInternals core;
  *  Fifo routines
  *-------------------------*/
 
-static int internal_seq_fifo_insert( struct SMotionSequence *seq )
+static struct SMotionFifoElement *internal_seq_fifo_get_fill_pointer( void )
+{
+    if ( core.seq_fifo.c >= MAX_SEQ_FIFO )
+        return NULL;
+    return &core.seq_fifo.seq[ core.seq_fifo.w ];
+}
+
+
+static int internal_seq_fifo_insert( struct SMotionFifoElement *seq )
 {
     if ( core.seq_fifo.c >= MAX_SEQ_FIFO )
         return -1;
 
-    core.seq_fifo.seq[ core.seq_fifo.w++ ] = *seq;
+    if ( seq != NULL )
+        core.seq_fifo.seq[ core.seq_fifo.w ] = *seq;
+
+    core.seq_fifo.w++;
+
     if ( core.seq_fifo.w == MAX_SEQ_FIFO )
         core.seq_fifo.w = 0;
     core.seq_fifo.c++;
@@ -33,7 +58,7 @@ static int internal_seq_fifo_insert( struct SMotionSequence *seq )
 }
 
 
-static int internal_seq_fifo_get( struct SMotionSequence *seq )
+static int internal_seq_fifo_get( struct SMotionFifoElement *seq )
 {
     if ( core.seq_fifo.c == 0 )
         return -1;
@@ -47,7 +72,7 @@ static int internal_seq_fifo_get( struct SMotionSequence *seq )
 }
 
 
-static int internal_seq_fifo_peek( struct SMotionSequence **seq, bool next )
+static int internal_seq_fifo_peek( struct SMotionFifoElement **seq, bool next )
 {
     int idx;
     if ( (core.seq_fifo.c == 0) || ( next && (core.seq_fifo.c == 1)) )
@@ -100,21 +125,57 @@ static inline uint32 internal_run_helper_get_distance( TStepCoord val1, TStepCoo
 }
 
 
-#define FP32      32
-#define FP16      16
-
-#define DASSERT(x)      do {   if ( !(x) ) \
-                                sprintf( stderr, "Assert: %s\n" # x );\
-                        } while(0);
-
-
-static void internal_run_goto( struct SMotionSequence *seq )
+static void internal_sequence_precalculate( struct SMotionSequence *mseq, struct SMotionFifoElement *fseq )
 {
-    uint32 dists[CNC_MAX_COORDS];
+    // fills    .distances
+    //          .Ttot
+    //          .dirmask
+
+    int i;
+    uint32 dirmask = 0;
+    uint32 *dists = fseq->params.go_to.distances;
+    uint64 sum = 0LL;
+    double L = 0;
+    double T = 0;
+
+    // get the distances and direction on each axis
+    dirmask = 0;
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
+    {
+        dirmask |= ( internal_run_helper_get_distance( core.seq_fifo.pcoord.coord[i],
+                                                       mseq->params.go_to.coord.coord[i],
+                                                       &dists[i] ) << i );
+    }
+    fseq->params.go_to.dirmask = dirmask;
+
+    // Calculate the total distance and total time
+    // L = sqrt( x*x + y*y + z*z + a*a )
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
+    {
+        sum += ((uint64)dists[i]) * ((uint64)dists[i]);
+    }
+
+    // T = L / sps_speed -> how many seconds we should step
+    // T = ( L * STEP_SEC ) / sps_speed -> how many step units we should step. This should be < 1
+    // t[i] = T / dist
+
+    L = sqrt( sum );                     // total lenght in steps (in fp32)
+    T = L / mseq->params.go_to.feed;     // Total time in seconds
+
+    // to fit in 32 bit - T(sec) < 214,748sec -> 59h - we should newer reach this value
+    DASSERT ( (uint32)(T) < 214748 );
+
+    // convert double time in fp32
+    fseq->params.go_to.Ttot = (uint64)( T * ( (1LL<<FP32) * STEP_SEC ) );         // Total time in sysclocks in fp32
+}
+
+
+static void internal_run_goto( struct SMotionFifoElement *seq )
+{
+    uint32 *dists = seq->params.go_to.distances;
     int i;
 
-    struct SMotionSequence *next_seq = NULL;
-
+    struct SMotionFifoElement *next_seq = NULL;
 
     // peek the next sequence for checking the speeds for speed difference
     if ( internal_seq_fifo_peek( &next_seq, false) == 0 )
@@ -123,50 +184,17 @@ static void internal_run_goto( struct SMotionSequence *seq )
             next_seq = NULL;
     }
 
-    // get the distances and direction on each axis
-    core.status.op.go_to.dirmask = 0;
+
+    // calculate step speed increment on each axis
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
-        core.status.op.go_to.dirmask |= ( internal_run_helper_get_distance( core.crt_coord.coord[i], seq->params.go_to.coord.coord[i], &dists[i] ) << i );
-    }
+        if ( dists[i] )
+            core.status.op.go_to.StepCkInc[i] = seq->params.go_to.Ttot / (dists[i]+1);        // nr. of sysclock / step in fp.32
+        else
+            core.status.op.go_to.StepCkInc[i] = seq->params.go_to.Ttot;
 
-    // calculate overall lenght and times
-    {
-        uint64 sum = 0LL;
-        double L = 0;
-        double T = 0;
-        uint64 Ti = 0;
-
-        // L = sqrt( x*x + y*y + z*z + a*a )
-        for ( i=0; i<CNC_MAX_COORDS; i++ )
-        {
-            sum += ((uint64)dists[i]) * ((uint64)dists[i]);
-        }
-
-        // T = L / sps_speed -> how many seconds we should step
-        // T = ( L * STEP_SEC ) / sps_speed -> how many step units we should step. This should be < 1
-        // t[i] = T / dist
-
-        L = sqrt( sum );                    // total lenght in steps (in fp32)
-        T = L / seq->params.go_to.feed;     // Total time in seconds
-
-        // constraints: 2h with 20kstep -> 32bit, in fp3 -> 64bit
-        // TODO: - In the sequence generator take care for low feed speeds with long distances - break them down in multi-sequence
-        DASSERT( T < (8*60*400*20000) );
-
-        Ti = (uint64)( T * ( (1LL<<FP32) * STEP_SEC ) );         // Total time in sysclocks in fp32
-
-        // calculate step speed increment on each axis
-        for ( i=0; i<CNC_MAX_COORDS; i++ )
-        {
-            if ( dists[i] )
-                core.status.op.go_to.StepCkInc[i] = Ti / (dists[i]+1);        // nr. of sysclock / step in fp.32
-            else
-                core.status.op.go_to.StepCkInc[i] = Ti;
-
-            DASSERT( core.status.op.go_to.StepCkInc[i] >= (1LL<<FP32) );
-            core.status.op.go_to.StepCkCntr[i] = core.status.op.go_to.StepCkInc[i];
-        }
+        DASSERT( core.status.op.go_to.StepCkInc[i] >= (1LL<<FP32) );
+        core.status.op.go_to.StepCkCntr[i] = core.status.op.go_to.StepCkInc[i];
     }
 
     core.status.is_running = true;
@@ -179,7 +207,7 @@ static void internal_run_goto( struct SMotionSequence *seq )
 
 
 
-static void internal_seq_run( struct SMotionSequence *seq, bool in_run )
+static void internal_seq_run( struct SMotionFifoElement *seq )
 {
     switch ( seq->seqType )
     {
@@ -221,7 +249,7 @@ static inline void internal_seqpoll_goto( void )
             {
                 // mark the step clock for this sysclock tick and step the soft coordinate also
                 stepmask |= (1<<i);
-                core.crt_coord.coord[i] += (core.status.op.go_to.dirmask & (1 << i)) ? 1 : -1;
+                core.crt_coord.coord[i] += (core.status.crt_seq.params.go_to.dirmask & (1 << i)) ? 1 : -1;
                 // set up the next stepping point
                 core.status.op.go_to.StepCkCntr[i]  += core.status.op.go_to.StepCkInc[i];
             }
@@ -234,7 +262,7 @@ static inline void internal_seqpoll_goto( void )
     if ( endmask != CNC_MAX_COORDMASK )  // if there still are working coordinates then proceed with step clock generation
     {
         // insert step clock
-        stepper_insert_clock( stepmask, core.status.op.go_to.dirmask );
+        stepper_insert_clock( stepmask, core.status.crt_seq.params.go_to.dirmask );
     }
     else
     {
@@ -253,15 +281,6 @@ static inline void internal_seqpoll_goto( void )
 static void internal_sequencer_poll( struct SEventStruct *evt )
 {
 
-    if ( core.status.is_running == false )
-    {
-        struct SMotionSequence seq;
-        if ( internal_seq_fifo_get( &seq ) == 0 )
-        {
-            internal_seq_run( &seq, false );
-        }
-    }
-
     if ( core.status.is_running )
     {
         switch ( core.status.crt_seq.seqType )
@@ -275,6 +294,16 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
                 break;
         }
     }
+    // if terminated or it isn't running
+    if ( core.status.is_running == false )
+    {
+        struct SMotionFifoElement seq;
+        if ( internal_seq_fifo_get( &seq ) == 0 )
+        {
+            internal_seq_run( &seq );
+        }
+    }
+
 
 
 }
@@ -319,6 +348,7 @@ void motion_pwr_ctrl( uint32 axis, uint32 power )
 bool motion_pwr_is_set( uint32 axis )
 {
 
+    return true;
 }
 
 
@@ -382,7 +412,36 @@ int motion_step( uint32 axis, uint32 dir )
 
 int motion_sequence_insert( struct SMotionSequence *seq )
 {
-    return internal_seq_fifo_insert( seq );
+    struct SMotionFifoElement *fseq;
+
+    fseq = internal_seq_fifo_get_fill_pointer();
+    if ( fseq == NULL )
+        return -1;
+
+    fseq->cmdID = seq->cmdID;
+    fseq->seqID = seq->seqID;
+    fseq->seqType = seq->seqType;
+
+    if ( seq->seqType == SEQ_TYPE_GOTO )
+    {
+        // for motion sequence we need to precalculate the parameters
+        if ( core.seq_fifo.pcoord_updated == 0 )
+        {
+            core.seq_fifo.pcoord = core.crt_coord;          // update the end coordinates with the current soft coordinate
+            core.seq_fifo.pcoord_updated = 1;
+        }
+        fseq->params.go_to.coord = seq->params.go_to.coord;
+        internal_sequence_precalculate( seq, fseq );
+        core.seq_fifo.pcoord = seq->params.go_to.coord;     // save the end coordinates of the introduced sequence
+    }
+    else
+    {
+        // for the other sequences
+        fseq->params.spindle = seq->params.spindle;
+        //location for note#0001 from motion_core_internals.h
+    }
+
+    return internal_seq_fifo_insert( NULL );
 }
 
 
@@ -414,7 +473,7 @@ uint32 motion_sequence_crt_cmdID()
         return core.status.crt_seq.cmdID;
     else
     {
-        struct SMotionSequence *seq;
+        struct SMotionFifoElement *seq;
         if ( internal_seq_fifo_peek( &seq, false ) )
             return CMD_ID_INVALID;
         return seq->cmdID;
@@ -428,7 +487,7 @@ uint32 motion_sequence_crt_seqID()
         return core.status.crt_seq.seqID;
     else
     {
-        struct SMotionSequence *seq;
+        struct SMotionFifoElement *seq;
         if ( internal_seq_fifo_peek( &seq, false ) )
             return CMD_ID_INVALID;
         return seq->seqID;
