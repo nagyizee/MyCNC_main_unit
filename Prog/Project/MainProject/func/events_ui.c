@@ -70,16 +70,19 @@ void StepTimerIntrHandler (void)
         // process emergency stop button
         events.timer_tick_system    = 1;
 
-        // Set Clock signals
-        if ( AxisControl.SavedTicks & (1 << COORD_X) )
-            HW_StepClk_X();
-        if ( AxisControl.SavedTicks & (1 << COORD_Y) )
-            HW_StepClk_Y();
-        if ( AxisControl.SavedTicks & (1 << COORD_Z) )
-            HW_StepClk_Z();
-        if ( AxisControl.SavedTicks & (1 << COORD_A) )
-            HW_StepClk_A();
-        AxisControl.SavedTicks = 0;
+        if ( AxisControl.SavedTicks )
+        {
+            // Set Clock signals
+            if ( AxisControl.SavedTicks & (1 << COORD_X) )
+                HW_StepClk_X();
+            if ( AxisControl.SavedTicks & (1 << COORD_Y) )
+                HW_StepClk_Y();
+            if ( AxisControl.SavedTicks & (1 << COORD_Z) )
+                HW_StepClk_Z();
+            if ( AxisControl.SavedTicks & (1 << COORD_A) )
+                HW_StepClk_A();
+            AxisControl.SavedTicks = 0;
+        }
     }
     // set up directions and check for clock signal
     else
@@ -215,7 +218,7 @@ uint32  stepper_insert_clock( uint32 tick, uint32 dir )        // clock and dir 
     AxisControl.axis[AxisControl.wp].dir    = dir;
     AxisControl.axis[AxisControl.wp].tick   = tick;
     AxisControl.wp++;
-    AxisControl.wp &= 0x03;
+    AxisControl.wp &= MAX_ISR_WRAPMASK;
     AxisControl.c++;
     __enable_interrupt();
     return 0;
