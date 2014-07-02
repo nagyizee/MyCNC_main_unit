@@ -106,7 +106,7 @@ struct SStepCoordinates CoordList[] = { { 28000, 9200, 18000, 0 },
                                         { 27169, 7777, 32000, 0 },
 };
 
-TFeedSpeed speeds[] = { 300, 250, 1200 };
+TFeedSpeed speeds[] = { 1200, 250, 1200 };
 
 static int lst = 0;
 

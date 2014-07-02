@@ -136,7 +136,7 @@
    <widget class="QGroupBox" name="groupBox_2">
     <property name="geometry">
      <rect>
-      <x>1140</x>
+      <x>1080</x>
       <y>480</y>
       <width>301</width>
       <height>111</height>
@@ -355,7 +355,7 @@
    <widget class="QPlainTextEdit" name="tx_commands">
     <property name="geometry">
      <rect>
-      <x>590</x>
+      <x>540</x>
       <y>470</y>
       <width>531</width>
       <height>131</height>
@@ -371,7 +371,7 @@
    <widget class="QPushButton" name="pb_feed_line">
     <property name="geometry">
      <rect>
-      <x>510</x>
+      <x>460</x>
       <y>470</y>
       <width>75</width>
       <height>23</height>
@@ -663,6 +663,31 @@
     </property>
     <property name="checkable">
      <bool>true</bool>
+    </property>
+   </widget>
+   <widget class="QSlider" name="vs_simu_speed">
+    <property name="geometry">
+     <rect>
+      <x>1400</x>
+      <y>490</y>
+      <width>20</width>
+      <height>101</height>
+     </rect>
+    </property>
+    <property name="minimum">
+     <number>0</number>
+    </property>
+    <property name="maximum">
+     <number>8</number>
+    </property>
+    <property name="pageStep">
+     <number>1</number>
+    </property>
+    <property name="sliderPosition">
+     <number>8</number>
+    </property>
+    <property name="orientation">
+     <enum>Qt::Vertical</enum>
     </property>
    </widget>
   </widget>

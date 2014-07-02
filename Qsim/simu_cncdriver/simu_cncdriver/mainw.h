@@ -59,6 +59,8 @@ private slots:
     void on_pb_bloc_execution_clicked();
 
 
+    void on_vs_simu_speed_valueChanged(int value);
+
 private:
     Ui::mainw *ui;
     QTimer *ticktimer;

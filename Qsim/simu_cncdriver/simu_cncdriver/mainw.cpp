@@ -12,6 +12,7 @@
 #define TIMER_INTERVAL          40       // 40ms -> 25 fps
 #define TICKS_TO_SIMULATE       2000      // 800 timer cycles to be simulated for 40ms
 
+int tick_to_sim = TICKS_TO_SIMULATE;
 
 mainw::mainw(QWidget *parent) :
     QMainWindow(parent),
@@ -80,7 +81,7 @@ void mainw::TimerTick()
     int i;
     int j;
 
-    for (i=0; i<TICKS_TO_SIMULATE; i++)
+    for (i=0; i<tick_to_sim; i++)
     {
 
         // simulated code section ----
@@ -196,3 +197,16 @@ void mainw::on_pb_bloc_execution_clicked()
 
 }
 
+
+void mainw::on_vs_simu_speed_valueChanged(int value)
+{
+    double ts[] = { 1.0/TICKS_TO_SIMULATE,                  // 1 tick / sim
+                    0.125, 0.25, 0.375,
+                    0.5,                                // 0.5 from max ticks
+                    0.625, 0.75, 0.875,
+                    1 };                                    // max ticks / sim
+
+    tick_to_sim =  (int)(TICKS_TO_SIMULATE * ts[value]);
+    if ( tick_to_sim == 0)
+        tick_to_sim = 1;
+}
