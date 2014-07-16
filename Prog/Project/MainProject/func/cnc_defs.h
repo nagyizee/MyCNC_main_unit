@@ -19,6 +19,8 @@
 
     #define STEP_MM             400
     #define STEP_SEC            10000   // 10kHz step clock - this is the base -> 25rpm -> 25mm/sec -> 1500mm/min
+    #define MM_P_M_NOACC        300
+    #define STEP_P_SEC_NOACC    ( (MM_P_M_NOACC * STEP_MM) / 60 )       // maximum step speed without acceleration
 
     #define STEP_X          ( 1 << COORD_X )
     #define STEP_Y          ( 1 << COORD_Y )

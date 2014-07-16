@@ -54,7 +54,7 @@
         uint64  Ttot;                           // total runtime in fp32
         uint64  StepCkInc[CNC_MAX_COORDS];      // sysclock increments for each steps
         uint64  StepCkCntr[CNC_MAX_COORDS];     // sysclock for the next step
-
+        int32 prev_speeds[CNC_MAX_COORDS];      // axis speeds from the previous sequence
 
     };
 

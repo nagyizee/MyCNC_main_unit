@@ -125,6 +125,14 @@ static inline uint32 internal_run_helper_get_distance( TStepCoord val1, TStepCoo
 }
 
 
+static int32 internal_run_helper_calculate_sps( struct SMotionFifoElement *seq, int i )
+{
+    if ( seq->params.go_to.distances[i] )
+        return ( (seq->params.go_to.distances[i] * STEP_SEC) / (seq->params.go_to.Ttot >> FP32)) * ( (seq->params.go_to.dirmask & (1 << i)) ? 1 : -1 );
+    return 0;
+}
+
+
 static void internal_sequence_precalculate( struct SMotionSequence *mseq, struct SMotionFifoElement *fseq )
 {
     // fills    .distances
@@ -174,6 +182,15 @@ static void internal_run_goto( struct SMotionFifoElement *seq )
 {
     uint32 *dists = seq->params.go_to.distances;
     int i;
+    int spd_start_ax = -1;
+    int32 prev_speeds[CNC_MAX_COORDS] = {0, };     // in steps/sec (sps)
+    int32 sp_start = 0;
+    uint32 spdiff_bgn = 0;          // max speed difference at the beginning of the current line sequence
+    uint32 spdiff_end = 0;          // max speed difference at the end of the current line sequence
+
+    int32 crt_speed[CNC_MAX_COORDS];
+    int32 next_speed[CNC_MAX_COORDS];
+    int32 *start_speed = core.status.op.go_to.prev_speeds;
 
     struct SMotionFifoElement *next_seq = NULL;
 
@@ -185,7 +202,7 @@ static void internal_run_goto( struct SMotionFifoElement *seq )
     }
 
 
-    // calculate step speed increment on each axis
+    // calculate step speed increment on each axis and check for speed differences for deciding about acceleration/deceleration
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
         if ( dists[i] )
@@ -193,9 +210,24 @@ static void internal_run_goto( struct SMotionFifoElement *seq )
         else
             core.status.op.go_to.StepCkInc[i] = seq->params.go_to.Ttot;
 
+        // calculate speed for the current sequence
+        crt_speed[i] = internal_run_helper_calculate_sps(seq, i);             // sps speed on the current axis
+
+        // calculate speed for the next sequence
+        if ( next_seq )
+            next_speed[i] = internal_run_helper_calculate_sps(next_seq, i);   // sps for the next sequence
+        else
+            next_speed[i] = 0;
+
         DASSERT( core.status.op.go_to.StepCkInc[i] >= (1LL<<FP32) );
         core.status.op.go_to.StepCkCntr[i] = core.status.op.go_to.StepCkInc[i];
     }
+
+
+
+
+
+
 
     core.status.is_running = true;
     core.status.crt_seq = *seq;
