@@ -57,6 +57,7 @@ mainw::mainw(QWidget *parent) :
     //--- test phase
     qsrand(0x64892354);
     main_entry( NULL );
+
 }
 
 mainw::~mainw()

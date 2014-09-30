@@ -125,6 +125,17 @@ static inline uint32 internal_run_helper_get_distance( TStepCoord val1, TStepCoo
 }
 
 
+static int32 internal_diff( int32 speed1, int32 speed2 )
+{
+    int32 diff = speed1 - speed2;
+    if ( diff >= 0 )
+        return diff;
+    else
+        return (-diff);
+}
+
+
+
 static int32 internal_run_helper_calculate_sps( struct SMotionFifoElement *seq, int i )
 {
     if ( seq->params.go_to.distances[i] )
@@ -175,6 +186,7 @@ static void internal_sequence_precalculate( struct SMotionSequence *mseq, struct
 
     // convert double time in fp32
     fseq->params.go_to.Ttot = (uint64)( T * ( (1LL<<FP32) * STEP_SEC ) );         // Total time in sysclocks in fp32
+    fseq->params.go_to.speed = mseq->params.go_to.feed;
 }
 
 
@@ -188,9 +200,9 @@ static void internal_run_goto( struct SMotionFifoElement *seq )
     uint32 spdiff_bgn = 0;          // max speed difference at the beginning of the current line sequence
     uint32 spdiff_end = 0;          // max speed difference at the end of the current line sequence
 
-    int32 crt_speed[CNC_MAX_COORDS];
-    int32 next_speed[CNC_MAX_COORDS];
     int32 *start_speed = core.status.op.go_to.prev_speeds;
+    bool need_accel = false;
+    bool need_decel = false;
 
     struct SMotionFifoElement *next_seq = NULL;
 
@@ -205,37 +217,101 @@ static void internal_run_goto( struct SMotionFifoElement *seq )
     // calculate step speed increment on each axis and check for speed differences for deciding about acceleration/deceleration
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
+        int32 diff;
+        int32 next_speed;
+        int32 crt_speed;
+
         if ( dists[i] )
             core.status.op.go_to.StepCkInc[i] = seq->params.go_to.Ttot / (dists[i]+1);        // nr. of sysclock / step in fp.32
         else
             core.status.op.go_to.StepCkInc[i] = seq->params.go_to.Ttot;
 
         // calculate speed for the current sequence
-        crt_speed[i] = internal_run_helper_calculate_sps(seq, i);             // sps speed on the current axis
+        // and check if acceleration is needed
+        crt_speed = internal_run_helper_calculate_sps(seq, i);             // sps speed on the current axis
+        if ( internal_diff( crt_speed, start_speed[i] ) > STEP_P_SEC_NOACC )
+            need_accel = true;
 
-        // calculate speed for the next sequence
+        // calculate speed for the next sequence and check if deceleration is needed
         if ( next_seq )
-            next_speed[i] = internal_run_helper_calculate_sps(next_seq, i);   // sps for the next sequence
+            next_speed = internal_run_helper_calculate_sps(next_seq, i);   // sps for the next sequence
         else
-            next_speed[i] = 0;
+            next_speed = 0;
+
+        if ( internal_diff( crt_speed, next_speed ) > STEP_P_SEC_NOACC )
+        {
+            need_decel = true;
+            start_speed[i] = 0;     // save 0 start speed for the next sequence since we decelerate
+        }
+        else
+            start_speed[i] = crt_speed;
 
         DASSERT( core.status.op.go_to.StepCkInc[i] >= (1LL<<FP32) );
         core.status.op.go_to.StepCkCntr[i] = core.status.op.go_to.StepCkInc[i];
     }
 
-
-
-
-
-
-
     core.status.is_running = true;
     core.status.crt_seq = *seq;
     core.status.op.go_to.Tctr = 0;
 
+    // calculate acceleration
+    if ( need_accel )
+    {
+        // acceleration is done from and to STEP_P_SEC_NOACC / 2
+        //  a = (v- v0) / t
+        //  2.5mm/s -> 6mm/s in 0.100s time - this means: 0.1step/sys clock tick  -> 0.24 step/tick in 1000ticks (0.1sec) interval:  a = 0.24-0.1 / 1000 = 0.00014
+        // 
+        // for ramp up:
+        //   start up with 0.1step/tb, acceleration = 0.00014
+        //   vcrt = 0.1 + a * t   -- need to reach v
+        // 
+        //   step time on an axis:
+        //      txorg = L / ( v * Dx )
+        //      txcrt = L / ( vcrt * Dx ) = L / (Dx * (0.1+0.00014*t))
+        //      
+        //      txcrt = f * txorg
+        //      f = txcrt / txorg = v / (0.1+0.00014*t)         - but we have the speed V in steps per second, the denominator is calculated in steps/sys tick
+        //      f = v / (10000 * (0.1+0.00014*t)) =
+        //        = v / (1000 + 1.4*t )
+        // 
+        //      txcrt = txorg * (v  / (1000 + 1.4*t ) )         - used in polling routine to calculate the timind for the next step
+        //  
+        //  test 1: axis X only, V = 300
+        //      V = 300 -> vstep = 2000 steps/sec
+        //      txorg = 0.2
+        //      - T=0:      f = 2,  => txcrt = f*txorg = 0.4 - double time / half speed => 1000 steps/sec -> 150mm/m
+        //      - T=500:    f = 1.176
+        // 
+        //      V = 500 -> vstep = 3333 steps/sec
+        //      txorg = 0.333
+        //      - T=0:      f = 2,  => txcrt = f*txorg = 0.4 - double time / half speed => 1000 steps/sec -> 150mm/m
+        //      - T=500:    f = 1.176
+
+        core.status.op.go_to.need_acc = true;
+        core.status.op.go_to.op_phase = GOTO_PHASE_ACCEL;
+
+    }
+    else
+    {
+        core.status.op.go_to.op_phase = GOTO_PHASE_CT;
+    }
+
+
+
     return;
 }
 
+
+void internal_run_hold_time( struct SMotionFifoElement *seq )
+{
+
+}
+
+
+void internal_run_spindle_speed( struct SMotionFifoElement *seq )
+{
+
+}
 
 
 
@@ -247,13 +323,35 @@ static void internal_seq_run( struct SMotionFifoElement *seq )
             internal_run_goto( seq );
             break;
         case SEQ_TYPE_HOLD:
+            internal_run_hold_time( seq );
             break;
         case SEQ_TYPE_SPINDLE:
+            internal_run_spindle_speed( seq );
             break;
     }
 
 }
 
+
+
+static uint64 internal_acceleration_factor( uint64 tstep_org )
+{
+    //      txcrt = txorg * (v  / (1000 + 1.4*t ) )         - used in polling routine to calculate the timind for the next step
+    if ( core.status.op.go_to.op_phase == GOTO_PHASE_ACCEL )
+    {
+        uint64 factor;
+        factor = ((uint64)(core.status.crt_seq.params.go_to.speed) << FP32) / (( (ACC_START_SPEED << FP32) + ACC_FACTOR_FP32 * (uint64)core.status.op.go_to.Tctr ) >> FP32 );
+        if ( factor <= ( 1LL << FP32 ) )
+        {
+            core.status.op.go_to.op_phase = GOTO_PHASE_CT;
+            return tstep_org;
+        }
+        return ((tstep_org >> 16) * (factor >> 16));            // multiply FP32 =  ( a * b ) >> 32 - but this doesn't fit in 64bit  
+    }
+    else
+        return tstep_org;
+
+}
 
 
 static inline void internal_seqpoll_goto( void )
@@ -283,7 +381,7 @@ static inline void internal_seqpoll_goto( void )
                 stepmask |= (1<<i);
                 core.crt_coord.coord[i] += (core.status.crt_seq.params.go_to.dirmask & (1 << i)) ? 1 : -1;
                 // set up the next stepping point
-                core.status.op.go_to.StepCkCntr[i]  += core.status.op.go_to.StepCkInc[i];
+                core.status.op.go_to.StepCkCntr[i]  += internal_acceleration_factor( core.status.op.go_to.StepCkInc[i] );
             }
         }
         else

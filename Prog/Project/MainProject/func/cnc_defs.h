@@ -22,6 +22,10 @@
     #define MM_P_M_NOACC        300
     #define STEP_P_SEC_NOACC    ( (MM_P_M_NOACC * STEP_MM) / 60 )       // maximum step speed without acceleration
 
+    #define ACC_FACTOR_FP32     ( (uint64)(1.4 * ( 1 << 32)) )      //  2.5mm/s -> 6mm/s in 0.100s time - this means: 0.1step/sys clock tick  -> 0.24 step/tick in 10000ticks interval:  a = 0.24-0.1 / 1000 = 0.00014
+    #define ACC_START_SPEED     ( 1000LL )                          // 150mm/min -> 1000steps/sec
+
+
     #define STEP_X          ( 1 << COORD_X )
     #define STEP_Y          ( 1 << COORD_Y )
     #define STEP_Z          ( 1 << COORD_Z )

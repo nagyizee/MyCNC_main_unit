@@ -101,7 +101,7 @@ static inline void System_Poll( void )
 }
 
 
-struct SStepCoordinates CoordList[] = { { 28000, 9200, 18000, 0 },
+struct SStepCoordinates CoordList[] = { { 28000, 18400, 32000, 0 },
                                         { 20000, 16000, 18000, 0 },
                                         { 27169, 7777, 32000, 0 },
 };

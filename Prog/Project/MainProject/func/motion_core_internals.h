@@ -16,6 +16,7 @@
         struct SStepCoordinates coord;      // coordinate to be reached
         uint32 distances[CNC_MAX_COORDS];   // distances
         uint64 Ttot;                        // total sysclock time for liniar motion in fp32
+        TFeedSpeed speed;                   // feed speed on the sequence
         uint32 dirmask;                     // direction mask
     };                                      // - total: 44bytes
 
@@ -46,6 +47,10 @@
         uint8   r;
     };
 
+    #define GOTO_PHASE_CT       0
+    #define GOTO_PHASE_ACCEL    1
+    #define GOTO_PHASE_DECEL    2
+
 
     struct SMotionGotoOp
     {
@@ -55,6 +60,9 @@
         uint64  StepCkInc[CNC_MAX_COORDS];      // sysclock increments for each steps
         uint64  StepCkCntr[CNC_MAX_COORDS];     // sysclock for the next step
         int32 prev_speeds[CNC_MAX_COORDS];      // axis speeds from the previous sequence
+        bool    need_acc;
+        bool    need_dec;
+        uint32  op_phase;                       // operation phase on goto sequence: accelerate, decelerate, constant               
 
     };
 
