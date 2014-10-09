@@ -18,13 +18,13 @@
     #define MAX_ISR_WRAPMASK    0x07
 
     #define STEP_MM             400
-    #define STEP_SEC            10000   // 10kHz step clock - this is the base -> 25rpm -> 25mm/sec -> 1500mm/min
+    #define STEP_CLOCK          50000       // step clock: 50KHz step clock (20us)  ( interrupt on each 1440 sysclock cycle - TIM1 from APB2 with 72MHz clock )
+    #define STEP_CKOFF          2           // 40us clock pulse duration for the selected driver chip
+
     #define MM_P_M_NOACC        300
     #define STEP_P_SEC_NOACC    ( (MM_P_M_NOACC * STEP_MM) / 60 )       // maximum step speed without acceleration
-
-    #define ACC_FACTOR_FP32     ( (uint64)(1.4 * ( 1 << 32)) )      //  2.5mm/s -> 6mm/s in 0.100s time - this means: 0.1step/sys clock tick  -> 0.24 step/tick in 10000ticks interval:  a = 0.24-0.1 / 1000 = 0.00014
-    #define ACC_START_SPEED     ( 1000LL )                          // 150mm/min -> 1000steps/sec
-
+    
+    #define ACC_FACTOR_FP32     ((uint32)( (uint64)(9000LL << 32) / (STEP_CLOCK * ( STEP_CLOCK / 2 )) ))    // 9000step/sec diff in 1/2 sec   
 
     #define STEP_X          ( 1 << COORD_X )
     #define STEP_Y          ( 1 << COORD_Y )

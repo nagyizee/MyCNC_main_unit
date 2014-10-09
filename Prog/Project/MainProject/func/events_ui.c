@@ -19,18 +19,18 @@ volatile struct SEventStruct events = { 0, };
 
 static struct SAxisControl
 {
-    struct SAxisData				// MAX_ISR_STEPS element step fifo from software
+    struct SAxisData                // MAX_ISR_STEPS element step fifo from software
     {
-        uint32   tick;				// clock bitmask
-        uint32   dir;				// direction bitmask.   1 - cws or plus, 0 - ccws or minus
+        uint32   tick;              // clock bitmask
+        uint32   dir;               // direction bitmask.   1 - cws or plus, 0 - ccws or minus
     } axis[MAX_ISR_STEPS];
 
-    struct SStepCoordinates Poz;	// hardware step counter. Reflects the current milling head position
+    struct SStepCoordinates Poz;    // hardware step counter. Reflects the current milling head position
 
     uint32   wp;
     uint32   rp;
     uint32   c;
-    uint32   SavedTicks;			// saved clock bitmask used internally. set up at 50us when direction is set up, executed and cleared at 100us
+    uint32   SavedTicks;            // saved clock bitmask used internally. set up at 50us when direction is set up, executed and cleared at 100us
 
 } AxisControl;
 
@@ -53,192 +53,11 @@ static struct SButtonOp
 } ButtOp = {0, };
 
 
-/////////////////////////////////////////////////////////////////////////////////////
-/// -------- IRQ Routines ---------
-/////////////////////////////////////////////////////////////////////////////////////
-
-void StepTimerIntrHandler (void)
+// this is called by step timer ISR
+void event_ISR_set10ms(void)
 {
-    static uint32 counter = 0;
-
-    // Clear update interrupt bit
-    TIMER_SYSTEM->SR = (uint16)~TIM_FLAG_Update;
-
-    // generate clock signals
-    if ( counter & 0x01 )
-    {
-        // process emergency stop button
-        events.timer_tick_system    = 1;
-
-        if ( AxisControl.SavedTicks )
-        {
-            // Set Clock signals
-            if ( AxisControl.SavedTicks & (1 << COORD_X) )
-                HW_StepClk_X();
-            if ( AxisControl.SavedTicks & (1 << COORD_Y) )
-                HW_StepClk_Y();
-            if ( AxisControl.SavedTicks & (1 << COORD_Z) )
-                HW_StepClk_Z();
-            if ( AxisControl.SavedTicks & (1 << COORD_A) )
-                HW_StepClk_A();
-            AxisControl.SavedTicks = 0;
-        }
-    }
-    // set up directions and check for clock signal
-    else
-    {
-        HW_StepClk_Reset();
-
-        if ( BtnGet_Emerg() )
-        {
-            events.emerg_button = 1;
-        }
-
-        // set up driver dirs
-        if ( AxisControl.c && (events.emerg_button == 0) )
-        {
-            uint32 tick;
-            uint32 dir;
-
-            tick = AxisControl.axis[AxisControl.rp].tick;
-            dir = AxisControl.axis[AxisControl.rp].dir;
-
-            if ( tick & (1 << COORD_X) )
-            {
-                if ( dir & (1 << COORD_X) )
-                {
-                    HW_SetDirX_Plus();
-                    AxisControl.Poz.coord[COORD_X]++;
-                }
-                else
-                {
-                    HW_SetDirX_Minus();
-                    AxisControl.Poz.coord[COORD_X]--;
-                }
-            }
-            if ( tick & (1 << COORD_Y) )
-            {
-                if ( dir & (1 << COORD_Y) )
-                {
-                    HW_SetDirY_Plus();
-                    AxisControl.Poz.coord[COORD_Y]++;
-                }
-                else
-                {
-                    HW_SetDirY_Minus();
-                    AxisControl.Poz.coord[COORD_Y]--;
-                }
-            }
-            if ( tick & (1 << COORD_Z) )
-            {
-                if ( dir & (1 << COORD_Z) )
-                {
-                    HW_SetDirZ_Plus();
-                    AxisControl.Poz.coord[COORD_Z]++;
-                }
-                else
-                {
-                    HW_SetDirZ_Minus();
-                    AxisControl.Poz.coord[COORD_Z]--;
-                }
-            }
-            if ( tick & (1 << COORD_A) )
-            {
-                if ( dir & (1 << COORD_A) )
-                {
-                    HW_SetDirA_Plus();
-                    AxisControl.Poz.coord[COORD_A]++;
-                }
-                else
-                {
-                    HW_SetDirA_Minus();
-                    AxisControl.Poz.coord[COORD_A]--;
-                }
-            }
-            AxisControl.SavedTicks = tick;
-            AxisControl.rp++;
-            AxisControl.rp &= MAX_ISR_WRAPMASK;
-            AxisControl.c--;
-            if ( AxisControl.c == 0 )
-            {
-                events.cnc_warn_last_step = 1;
-            }
-
-        }
-        else
-        {
-            events.cnc_warn_no_more_steps = 1;
-        }
-    }
-
-    counter++;
-    if ( counter == SYSTEM_T_10MS_COUNT )
-    {
-        counter = 0;
-        events.timer_tick_10ms  = 1;
-    }
-
+    events.timer_tick_10ms  = 1;
 }
-
-
-
-/////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////////////////////
-
-uint32  stepper_getQ( void )
-{
-    return AxisControl.c;
-}
-
-
-uint32 stepper_clearQ( void )
-{
-    uint32  stepsInQ;
-    __disable_interrupt();
-    stepsInQ = AxisControl.c;
-    AxisControl.c     = 0;
-    AxisControl.rp    = 0;
-    AxisControl.wp    = 0;
-    AxisControl.SavedTicks = 0;
-    __enable_interrupt();
-    return stepsInQ;
-}
-
-uint32  stepper_insert_clock( uint32 tick, uint32 dir )        // clock and dir are bitfields with the 4 axis
-{
-    __disable_interrupt();
-    if ( AxisControl.c == MAX_ISR_STEPS )
-    {
-        __enable_interrupt();
-        return 1;       // fifo full;
-    }
-
-    AxisControl.axis[AxisControl.wp].dir    = dir;
-    AxisControl.axis[AxisControl.wp].tick   = tick;
-    AxisControl.wp++;
-    AxisControl.wp &= MAX_ISR_WRAPMASK;
-    AxisControl.c++;
-    __enable_interrupt();
-    return 0;
-}
-
-
-void    stepper_set_coord( struct SStepCoordinates *coord )
-{
-    __disable_interrupt();
-    AxisControl.Poz = *coord;
-    __enable_interrupt();
-}
-
-void    stepper_get_coord( struct SStepCoordinates *coord )
-{
-    __disable_interrupt();
-    *coord  = AxisControl.Poz;
-    __enable_interrupt();
-}
-
 
 
 void Process_LED( void )

@@ -54,12 +54,6 @@
     #define BUTTON_RESUME   0x02
     #define BUTTON_TOOLCH   0x04
 
-    uint32  stepper_getQ( void );
-    uint32  stepper_clearQ( void );
-    uint32  stepper_insert_clock( uint32 tick, uint32 dir );       // clock and dir are bitfields with the 4 axis
-
-    void    stepper_set_coord( struct SStepCoordinates *coord );
-    void    stepper_get_coord( struct SStepCoordinates *coord );
 
     struct SEventStruct Event_Poll(void);
     void    Event_Clear(struct SEventStruct evmask);

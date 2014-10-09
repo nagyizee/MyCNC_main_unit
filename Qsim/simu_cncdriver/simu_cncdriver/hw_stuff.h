@@ -18,7 +18,7 @@ enum EHWAxisPower
 
 
 // Always update from the real hw_stuff.h
-#define SYSTEM_T_10MS_COUNT      200            // 50us timer tick -> 200 ticks -> 10ms
+#define SYSTEM_T_10MS_COUNT      500            // 20us timer -> 500 systicks / 10ms
 
 #define TIMER_SYSTEM            TIM1
 
@@ -59,8 +59,12 @@ void HW_StepClk_X();
 void HW_StepClk_Y();
 void HW_StepClk_Z();
 void HW_StepClk_A();
-void HW_StepClk_Reset();
 
+void HW_StepClk_Reset();
+void HW_ResetClk_X();
+void HW_ResetClk_Y();
+void HW_ResetClk_Z();
+void HW_ResetClk_A();
 
 // just a wrapper solution
 void main_entry(uint32 *stack_top);

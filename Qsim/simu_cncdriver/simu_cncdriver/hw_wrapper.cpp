@@ -132,10 +132,11 @@ void HW_StepClk_A()
     pClass->dispsim_add_point();
 }
 
-void HW_StepClk_Reset()
-{
-    //dummy
-}
+void HW_StepClk_Reset() {  /*dummy*/  }
+void HW_ResetClk_X() {  /*dummy*/  }
+void HW_ResetClk_Y() {  /*dummy*/  }
+void HW_ResetClk_Z() {  /*dummy*/  }
+void HW_ResetClk_A() {  /*dummy*/  }
 
 
 

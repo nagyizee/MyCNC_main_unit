@@ -1,3 +1,114 @@
+
+// ------------------------------------------------------------
+// Step pulse generator:
+// How this works:
+// If on a coordinate we have to move from point 0 to point X in N steps:
+// 
+// Time base is system tick defined in STEP_CLOCK. 
+// Distance done on coordinate:  D = v * t
+//                               v is steps/STEP_CLOCK 
+//                               t is incremental and quantized in STEP_CLOCK on each pulse
+//                          so we have D = (steps/STEP_CLOCK) * STEP_CLOCK => D = steps * Nr. of clock cycles executed
+//      =? we will calculate D incrementally.
+//                          D(n) = D(n-1) + Stp     where Stp is step speed in steps/STEP_CLOCK units for the coordinate
+//                          D is composed from Dint:Dfract
+//                                  Dint - integer part - this is the actual step distance quantized by the motors
+//                                  Dfract - fractional part - step speed is added to this, when it overflows it increments Dint
+//                          ! As a rule: Stp should be under 0.5 in FP32 !!! ( this is < 1 step pulse per 2 sys clocks )
+// 
+// 
+
+// ------------------------------------------------------------
+// Distance: Calibrating FP precision:
+// consider 40x1600 step for rotary table ( 64000 step / 360* ) -> 0*0'20.25" -> 0.005mm on 100mm dia. rotary table
+//          500x200x300mm xyz work area
+// --> maximum length = 254747 -> 0x3E31B ( we need 18 bit to encode this )
+// with everything at maximum:
+//          254746.933249451
+// c.1 dec A 1 step:
+//          254746.682          -> 0.251 diff on 1 step
+// c.2 have 1 step dist on A [0->1]:
+//          246576.560118759    -> 246576.560120787   => 0.000002028 - to sense it we need 0x7A121 -> 0x7FFFF 
+// c.3 have 1 step dist on X [0->1]:
+//          157784.663386528    -> 157784.663389697   => -0.000003169 - 0x4E200
+// So for worst case scenario - we need L(f) * (1<<19)
+// Test the formula with the cases abowe
+//      c.1:    133560760139  -> 133560628423   => 131,716
+//      c.2:    129277131551  -> 129277131552   => 1            - so it senses the absolute minimum changes also
+//      c.3:     82724605597  ->  82724605599   => 2
+// L after the 19fp shift becomes a 37bit value
+
+// ------------------------------------------------------------
+// stepspeed = steps / stepclock.        mm/min -> stp/ck:
+// Nmm/min = N * 400 / 60 step/sec = ( N * 400 )/ ( 60 * STEP_CLOCK ) 
+// 
+// speed on an axis =  Dist * speed / L  ( ax.speed < total speed )
+// 
+// minimum allowed speed 20mm/min -> 0.002(6)   steps/stepclock
+// Worst case scenario:
+//      going XYZdist: 500,200,300mm with 20mm/min -> 200000, 80000, 120000 steps 
+//              Adist: 0.005mm (r50mm)             -> 1 step
+// Speeds for each axis:
+//              sxyz = 0.002163, 0.000865, 0.00129
+//              sa   = 1.081*10e-8      
+//      sa if 2steps = 2.16*10e-8
+// Smallest value is 10e-8 = 1 / 100,000,000 = 1 / 0x05f5e100  - consider with 1 / 0x07ff ffff  -> minimum fp. shift = 27bit.
+// So 1<<32 will give sufficient precision
+
+// ------------------------------------------------------------
+// Acceleration:
+// acceleration is a speed increment in steps/stepclock   
+// Ex. accelerate from 150mm/min -> 1500mm/min in 0.5sec:
+//     1350mm/min in 0.5sec -> 9000 steps/sec difference in 0.5sec or in stepclock/0.5 
+// To obtain acceleration increment at step clock (speed is increased or decreased with this value):
+// 
+// Acc(stp/sck^2) = StpSpeedDif / TimePeriod(in stepck units)
+// Using the example 0.5sec for 1350mm/min -> StpSpeedDif = 9000/stepck = 0.18
+//                                            TimePeriod = 0.5s = 25000 stepck
+//      Acceleration = 0.0000072 stp/sck^2
+// But this is for the toolpath. Acceleration is scaled for each axis like the speeds:
+// Worst case scenario:  XYZ:500,200,300mm, and 1 step on A axis
+//      0.25 sec iv:    AccFP42 = 0x0000013B
+//      0.5  sec iv:    AccFP42 = 0x0000009D   
+//      1    sec iv:    AccFP42 = 0x0000004E  
+// Worst case scenario:  XYZ:0,0,0mm, and 360* on A axis ( max value on acceleration )
+//      0.25 sec iv:    AccFP42 = 0x03c65e1d
+//      0.5  sec iv:    AccFP42 = 0x01e32f03   
+//      1    sec iv:    AccFP42 = 0x00f19400
+// So we can hold acceleration in a 32bit variable for each channel
+//
+// ------------------------------------------------------------
+// Acceleration profile calculation:
+// we have the followings:  Vfs, Vfc, Vfe   - Start speed, Constant speed, End speed.
+//                          D - distance in steps
+// We need to know: D1 - distance when the constant speed applies
+//                  D2 - distance when the next acc/dec. begins
+//                  a1 - till D1 to accelerate or decelerate
+//                  a2 - after D2 to accelerate or decelerate
+// 
+//    - formula:    V2^2 = V1^2 + 2*a*D
+//              so  D = ( V2^2 - V1^2 ) / 2 * ACC
+// 
+// - !!! First validity condition:
+//          D (Vfs-Vfe) should be <= D  
+// 
+// - Calculate i1 and i2 using Vfs->Vfc and Vfc->Vfe as speeds
+// - If (Vfs<Vct) -> a1 positive
+//      (Vfs>Vct) -> a1 negative
+// - If (Vfe<Vct) -> a2 negative
+//      (Vfe>Vct) -> a2 positive
+// 
+// - If (a1 ^ a2 )  (means a1/a2 alternates)
+//      if  i1 <= i2 -> trapezoidal: D1 = i1, D2 = i2
+//      if  i1 >  i2 -> triangular:  calculate i3, D1 = D2 = i3
+//      i3 = (i1-i2)/2 + i2
+// 
+// 
+// - If (a1 ^ a2) = 0   ( a1/a2 both pos/neg)
+//      D1 = i1, D2 = i2
+//      NOTE: i1 < i2 all times if the validity condition is fulfilled
+// 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +121,7 @@
 
 #define FP32      32
 #define FP16      16
+#define FPlen     19
 
 #define DASSERT(x)      do {   if ( !(x) ) \
                                {   sprintf( stderr, "Assert: %s\n", # x );\
@@ -19,6 +131,261 @@
 
 
 struct SMotionCoreInternals core;
+struct SMotionCoreISR       isr;
+
+extern void event_ISR_set10ms( void );
+
+/* *************************************************
+ *
+ *  ISR part 
+ *
+ * *************************************************/
+
+static uint32 ISR_counter = 0;
+
+
+static inline void local_isr_step_channel( int i )
+{
+    // increment distance counter
+    isr.op.D[i] += isr.crt_action.p.Stp_crt[i];
+
+    // step when integer part changes
+    if ( isr.op.Dprev[i] != (uint32)(isr.op.D[i] >> 32) )
+    {
+        switch ( i )
+        {
+            case 0: HW_StepClk_X(); break;  
+            case 1: HW_StepClk_Y(); break;  
+            case 2: HW_StepClk_Z(); break;  
+            case 3: HW_StepClk_A(); break;  
+        }
+
+        // inc/dec absolute position counters
+        if ( isr.crt_action.dir_mask & ( 1 << i ) )
+            isr.crt_poz.coord[i]++;
+        else
+            isr.crt_poz.coord[i]--;
+
+        // if reached the coordinate on axis - disable it
+        if ( isr.crt_action.p.dest_poz.coord[i] == isr.crt_poz.coord[i] )
+            isr.crt_action.channel_active &= ~(1 << i);
+
+        isr.op.Dprev[i] = (uint32)( isr.op.D[i] >> 32 );                // save for the half period
+        isr.ckoff[i] = STEP_CKOFF;
+        isr.ckmask |= ( 1 << i );
+    }
+}
+
+
+static inline void local_isr_step_turn_channel_off( int i )
+{
+    isr.ckoff[i]--;
+    if ( isr.ckoff[i] == 0 )
+    {
+        switch ( i )
+        {
+            case 0: HW_ResetClk_X(); break; 
+            case 1: HW_ResetClk_Y(); break; 
+            case 2: HW_ResetClk_Z(); break; 
+            case 3: HW_ResetClk_A(); break; 
+        }
+        isr.ckmask &= ~( 1 << i );
+    }
+}
+
+static inline void local_isr_recalculate_speeds( void )
+{
+    // recalculate speeds
+
+    // acceleration
+    if ( (isr.state == MCISR_STATUS_RUP) &&             // if accelerating
+    {
+        if (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[0]) ) // and max. acceleration point is reached
+            isr.state = MCISR_STATUS_CT;
+        else
+        {   
+            // recalculate speeds for acceleration on each axis
+    
+        }
+
+    }
+
+    // constant
+    if ( (isr.state == MCISR_STATUS_CT) &&              // if constant (or just finished accelerating)
+         (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[1]) )   // and deceleration point is reached
+    {
+        isr.state = MCISR_STATUS_RDOWN;
+    }
+
+    // deceleration
+    if ( isr.state == MCISR_STATUS_RDOWN )
+    {
+
+    }
+
+}
+
+
+static void local_isr_set_directions( uint32 dir )
+{
+    if ( dir & (1 << COORD_X) )
+        HW_SetDirX_Plus();
+    else
+        HW_SetDirX_Minus();
+
+    if ( dir & (1 << COORD_Y) )
+        HW_SetDirY_Plus();
+    else
+        HW_SetDirY_Minus();
+
+    if ( dir & (1 << COORD_Z) )
+        HW_SetDirZ_Plus();
+    else
+        HW_SetDirZ_Minus();
+
+    if ( dir & (1 << COORD_A) )
+        HW_SetDirA_Plus();
+    else
+        HW_SetDirA_Minus();
+}
+
+
+static void local_isr_peek_next_action( void )
+{
+    uint32 dir;
+    isr.crt_action = isr.next_action;       // copy the action struct
+    isr.next_action.channel_active = 0;     // mark the user level action struct as free
+
+    memset( &isr.op, 0, sizeof(isr.op) );
+
+    isr.state = MCISR_STATUS_RUP;
+
+    // set up motor directions
+    local_isr_set_directions( isr.crt_action.dir_mask );
+}
+
+
+void StepTimerIntrHandler (void)
+{
+    // Clear update interrupt bit
+    TIMER_SYSTEM->SR = (uint16)~TIM_FLAG_Update;
+
+    if ( isr.state )
+    {
+        int i;
+
+        for ( i=0; i<CNC_MAX_COORDS; i++ )
+        {
+            if ( isr.ckmask & (1 << i) )
+                local_isr_step_turn_channel_off(i);
+
+            if ( isr.crt_action.channel_active & (1 << i) ) // channel is in move
+                local_isr_step_channel(i);
+        }
+
+        local_isr_recalculate_speeds();
+
+        // if movement action is finished, set to idle and if available start a new one
+        if ( isr.crt_action.channel_active == 0 )
+        {
+            isr.state = MCISR_STATUS_IDLE;
+            local_isr_peek_next_action();
+        }
+    }
+    else
+    {   
+        // check if there is a new action
+        if ( isr.next_action.channel_active )
+            local_isr_peek_next_action();
+        // check if clock pulse should be deactivated
+        if ( isr.ckmask & (1 << i) )
+            local_isr_step_turn_channel_off(i);
+    }
+    
+    ISR_counter++;
+    if ( ISR_counter == SYSTEM_T_10MS_COUNT )
+    {
+        ISR_counter = 0;
+        event_ISR_set10ms();
+    }
+}
+
+
+
+
+/*--------------------------
+ *  User level interaction
+ *-------------------------*/
+
+void    stepper_set_coord( struct SStepCoordinates *coord )
+{
+    __disable_interrupt();
+    isr.crt_poz = *coord;
+    __enable_interrupt();
+}
+
+void    stepper_get_coord( struct SStepCoordinates *coord )
+{
+    __disable_interrupt();
+    *coord  = isr.crt_poz;
+    __enable_interrupt();
+}
+
+int     stepper_add_action( struct SMotionCoreISRaction *action )
+{
+    if ( isr.next_action.channel_active )
+        return -1;
+
+    __disable_interrupt();
+    isr.next_action = *action;
+    __enable_interrupt();
+}
+
+#define stepper_check_action_busy()     ( isr.next_action.channel_active )
+
+#define stepper_check_in_progress()     ( irs.status )
+
+void    stepper_stop_and_clear()
+{
+    __disable_interrupt();
+    isr.state = MCISR_STATUS_IDLE;
+    isr.next_action.channel_active = 0;
+    isr.crt_action.channel_active = 0;
+    __enable_interrupt();
+}
+
+void    stepper_insert_step( uint32 coords, uint32 dirmask )
+{
+    int i;
+    local_isr_set_directions( dirmask ); 
+
+    __disable_interrupt();
+
+    if ( coords & (1 << COORD_X) )
+        HW_StepClk_X();
+    if ( coords & (1 << COORD_Y) )
+        HW_StepClk_Y();
+    if ( coords & (1 << COORD_Z) )
+        HW_StepClk_Z();
+    if ( coords & (1 << COORD_A) )
+        HW_StepClk_A();
+
+    for ( i=0; i<CNC_MAX_COORD; i++ )
+    {
+        if ( coords & (1 << i) )
+        {
+            if ( isr.crt_action.dir_mask & ( 1 << i ) )
+                isr.crt_poz.coord[i]++;
+            else
+                isr.crt_poz.coord[i]--;
+            isr.ckoff[i] = STEP_CKOFF + 1;
+        }
+    }
+
+    isr.ckmask |= coords;
+    __enable_interrupt();
+}
+
 
 
 
@@ -124,38 +491,102 @@ static inline uint32 internal_run_helper_get_distance( TStepCoord val1, TStepCoo
     }
 }
 
-
-static int32 internal_diff( int32 speed1, int32 speed2 )
+static uint32 internal_calculate_stepspeed( uint32 feedspeed )
 {
-    int32 diff = speed1 - speed2;
-    if ( diff >= 0 )
-        return diff;
-    else
-        return (-diff);
+    return ( ((uint64)feedspeed * 400) << FP32 ) / ( 60 * STEP_CLOCK );         // feedspeed 12bit + 9bit + 32bit = 53bit
+}                                                                               // returns fp32
+
+static uint32 internal_calculate_acc_dist_fp16( uint32 v1, uint32 v2 )
+{
+    // D = ( V2^2 - V1^2 ) / 2 * ACC
+    // v1, v2 are in fp32 ->  v^2 will produce fp64, divided with ACCfp32 -> fp32, will divide with fp16 to obtain distance in fp16
+    return  ((uint64)v2*v2-(uint64)v1*v1) / ( (uint64)ACC_FACTOR_FP32 << 17 );                  // the 17 is from 2*Acc: (fp16)16 + 1 (shift it one more)
 }
 
 
-
-static int32 internal_run_helper_calculate_sps( struct SMotionFifoElement *seq, int i )
+static inline int internal_calculate_accdec_distances( struct SMotionSequence *mseq, struct SMotionFifoElement *fseq, uint64 L, uint32 *dists )
 {
-    if ( seq->params.go_to.distances[i] )
-        return ( (seq->params.go_to.distances[i] * STEP_SEC) / (seq->params.go_to.Ttot >> FP32)) * ( (seq->params.go_to.dirmask & (1 << i)) ? 1 : -1 );
+    uint32  i1;
+    uint32  i2;
+    int64   D_i1;   // in FPlen
+    int64   D_i2;   // (total distance - i2) in FPlen
+
+    // check validity D (Vfs-Vfe) should be <= D  
+    if ( mseq->params.go_to.feed_bgn <= mseq->params.go_to.feed_end )
+        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_bgn, mseq->params.go_to.feed_end );
+    else
+        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_end, mseq->params.go_to.feed_bgn );
+
+    if ( i1 >= (uint32)( L >> (FPlen-16) ) )
+        return -1;      // ERROR - should not happen
+
+    i1 = 0;
+    i2 = 0;
+
+    // calculate start acceleration
+    fseq->params.go_to.p.accsens = 0;
+    if ( mseq->params.go_to.feed_bgn < mseq->params.go_to.feed_speed )
+    {
+        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_bgn, mseq->params.go_to.feed_speed );
+        fseq->params.go_to.p.accsens |= 0x01;   // bit 0 - set to '1' - means it accelerate (positive acceleration)
+    }
+    else if ( mseq->params.go_to.feed_bgn > mseq->params.go_to.feed_speed )
+        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_speed, mseq->params.go_to.feed_bgn );
+    else
+        fseq->params.go_to.p.accdec[0] = 0;     // no acceleration
+
+    // calculate end acceleration
+    if ( mseq->params.go_to.feed_speed < mseq->params.go_to.feed_end )
+    {
+        i2 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_speed, mseq->params.go_to.feed_end );
+        fseq->params.go_to.p.accsens |= 0x02;   // bit 1 - set to '1' - means it accelerate (positive acceleration)
+    }
+    else if ( mseq->params.go_to.feed_speed > mseq->params.go_to.feed_end )
+        i2 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_end, mseq->params.go_to.feed_speed );
+    else
+        fseq->params.go_to.p.accdec[1] = ( (uint64)dists[fseq->params.go_to.ax_max_dist] << 32 );   // no acceleration - set acceleration bgn. point to the longest distance
+
+    // Note: L is in FPlen, i2 is in FP16
+    D_i2 = (int64)L - (int64)( (uint64)i2 << (FPlen - FP16) );      // it is in FPlen
+    D_i1 = (int64)( (uint64)i1 << (FPlen - FP16) );
+
+    // for the same acceleration direction
+    if ( (fseq->params.go_to.p.accsens == 0x01) || (fseq->params.go_to.p.accsens == 0x02) ) // sign differs - accelerate/decelerate
+    {
+        int64 D_i1;
+        
+        if ( D_i1 > D_i2 )
+        {
+            // if  i1 >  i2 -> triangular:  calculate i3, D1 = D2 = i3  where i3 = (i1-i2)/2 + i2
+            D_i1 = D_i2 + ( D_i1 - D_i2 ) / 2;
+            D_i2 = D_i1;
+        }
+        // else if  i1 <= i2 -> trapezoidal: D1 = i1, D2 = i2
+    }
+    // else if both negative or positive: D1 = i1, D2 = D_i2 
+
+    // transpose i1, i2 to distance on the longest axis
+    // axdist = D_ix * dax / L          - 37bit + 18bit = 55bit - can add 9 bits for precision, 
+    // to obtain fp32 on distance we will add 9 bits by downshift L, and 14 bits by shifting the result:  9 + 9 + 14 -> 32 bit
+    fseq->params.go_to.p.accdec[0] = ( ( ((uint64)D_i1 * (dists[fseq->params.go_to.ax_max_dist] << 9)) / ( L >> 9 ) ) << 14 );
+    if ( D_i1 == D_i2 )
+        fseq->params.go_to.p.accdec[1] = fseq->params.go_to.p.accdec[0];
+    else
+        fseq->params.go_to.p.accdec[1] = ( ( ((uint64)D_i2 * (dists[fseq->params.go_to.ax_max_dist] << 9)) / ( L >> 9 ) ) << 14 );
     return 0;
 }
 
 
-static void internal_sequence_precalculate( struct SMotionSequence *mseq, struct SMotionFifoElement *fseq )
+static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct SMotionFifoElement *fseq )
 {
-    // fills    .distances
-    //          .Ttot
-    //          .dirmask
-
-    int i;
+    uint32 dists[CNC_MAX_COORDS];
     uint32 dirmask = 0;
-    uint32 *dists = fseq->params.go_to.distances;
+    uint32 maxdist = 0;
     uint64 sum = 0LL;
-    double L = 0;
-    double T = 0;
+    int i;
+    uint64 L = 0;
+    RMuint32 stepspeed;
+    RMuint32 startspeed;
 
     // get the distances and direction on each axis
     dirmask = 0;
@@ -165,243 +596,131 @@ static void internal_sequence_precalculate( struct SMotionSequence *mseq, struct
                                                        mseq->params.go_to.coord.coord[i],
                                                        &dists[i] ) << i );
     }
-    fseq->params.go_to.dirmask = dirmask;
+    fseq->params.go_to.dir_mask = (uint8)dirmask;
+    fseq->params.go_to.p.dest_poz = seq->params.go_to.coord;
 
-    // Calculate the total distance and total time
+    // Calculate the total distances
     // L = sqrt( x*x + y*y + z*z + a*a )
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
         sum += ((uint64)dists[i]) * ((uint64)dists[i]);
+        if ( maxdist < dist[i] )
+        {
+            maxdist = dist[i];
+            fseq->params.go_to.ax_max_dist = (uint8)i;
+        }
+    }
+                                                            
+    L = (uint64)( sqrt( sum ) * (1LL<<FPlen) );
+
+    // Calculate stepspeed ( see explanation abowe )
+    stepspeed = internal_calculate_stepspeed( mseq->params.go_to.feed_speed );      // stepspeed in fp.32 - it will use 31 bit always
+    if ( mseq->params.go_to.feed_speed != mseq->params.go_to.feed_bgn )
+        startspeed = internal_calculate_stepspeed( mseq->params.go_to.feed_bgn ); 
+    else
+        startspeed = stepspeed;
+
+    DASSERT( (stepspeed & 0x80000000) == 0 );                                       // should never overrun 31 bits
+    DASSERT( (startspeed & 0x80000000) == 0 );                                       // should never overrun 31 bits
+    DASSERT( (ACC_FACTOR_FP32 & 0xFFFF0000) == 0 );                                 // acceleration factor should fit in 16 bit
+
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
+    {
+        // Calculation: axspeed = (( stpspeedFP32 * dist ) * ( 1<<FPlen)) / L   -> will maintain FP32 for axspeed
+        // Problem is: stpspeedFP32 * dist * (1<<FPlen)  --->   31bit + 18bit + 19bit = 68bit - need to get rid of 4 bits
+        // since stepspeed encoding can be done on 27 bit - change the formula:
+        // axspeed = (( (stpspeedFP32) * dist ) * ( 1<<(FPlen-4))) / ( L >> 4 )
+        fseq->params.go_to.p.Stp_ct[i] = ( (((uint64)stepspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
+
+        if ( startspeed == stepspeed )
+            fseq->params.go_to.p.Stp_crt[i] = fseq->params.go_to.p.Stp_ct[i];
+        else
+            fseq->params.go_to.p.Stp_crt[i] = ( (((uint64)startspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
+
+        // Acc[i] = Dist[i] * ACCFACTOR / totalDist  + 10bit shift to have FP42
+        // To get acceleration in FP42 must shift with 10 bit additional.   nominator bit count: 16 + 10 + 19 + 18 = 63;    the (16+10) + 16 gives the fp42
+        // max error: 5steps / 500mm
+        fseq->params.go_to.p.Acc[i] = ( (((uint64)ACC_FACTOR) << (FPlen+10)) * dists[i] ) / L;   
     }
 
-    // T = L / sps_speed -> how many seconds we should step
-    // T = ( L * STEP_SEC ) / sps_speed -> how many step units we should step. This should be < 1
-    // t[i] = T / dist
+    // Calculate acceleration/deceleration distances
+    if ( internal_calculate_accdec_distances( mseq, fseq, L, dists ) )
+        return -1;
 
-    L = sqrt( sum );                     // total lenght in steps (in fp32)
-    T = L / mseq->params.go_to.feed;     // Total time in seconds
-
-    // to fit in 32 bit - T(sec) < 214,748sec -> 59h - we should newer reach this value
-    DASSERT ( (uint32)(T) < 214748 );
-
-    // convert double time in fp32
-    fseq->params.go_to.Ttot = (uint64)( T * ( (1LL<<FP32) * STEP_SEC ) );         // Total time in sysclocks in fp32
-    fseq->params.go_to.speed = mseq->params.go_to.feed;
+    return 0;
 }
 
 
-static void internal_run_goto( struct SMotionFifoElement *seq )
+static void internal_seqpoll_run_goto( struct SMotionFifoElement *seq )
 {
-    uint32 *dists = seq->params.go_to.distances;
+    // calculate the new action parameters and send to isr stepper
+    //
+    // stepping is controlled by speed/axis - where speed is given steps/sys clock ( always < 1 ) 
+    // which when added together at sysclock will give the distance made ( in 32:32fp )
+
+    struct SMotionCoreISRaction action;
+
+    
+
+    uint32 *dists   = seq->params.go_to.distances;  // distances on each axis
+    uint32 max_dist = 0;
     int i;
-    int spd_start_ax = -1;
-    int32 prev_speeds[CNC_MAX_COORDS] = {0, };     // in steps/sec (sps)
-    int32 sp_start = 0;
-    uint32 spdiff_bgn = 0;          // max speed difference at the beginning of the current line sequence
-    uint32 spdiff_end = 0;          // max speed difference at the end of the current line sequence
 
-    int32 *start_speed = core.status.op.go_to.prev_speeds;
-    bool need_accel = false;
-    bool need_decel = false;
-
-    struct SMotionFifoElement *next_seq = NULL;
-
-    // peek the next sequence for checking the speeds for speed difference
-    if ( internal_seq_fifo_peek( &next_seq, false) == 0 )
-    {
-        if ( next_seq->seqType != SEQ_TYPE_GOTO )
-            next_seq = NULL;
-    }
+    action.p.dest_poz = seq->params.go_to.coord;
+    action.dir_mask = seq->params.go_to.dirmask;
 
 
-    // calculate step speed increment on each axis and check for speed differences for deciding about acceleration/deceleration
-    for ( i=0; i<CNC_MAX_COORDS; i++ )
-    {
-        int32 diff;
-        int32 next_speed;
-        int32 crt_speed;
 
-        if ( dists[i] )
-            core.status.op.go_to.StepCkInc[i] = seq->params.go_to.Ttot / (dists[i]+1);        // nr. of sysclock / step in fp.32
-        else
-            core.status.op.go_to.StepCkInc[i] = seq->params.go_to.Ttot;
 
-        // calculate speed for the current sequence
-        // and check if acceleration is needed
-        crt_speed = internal_run_helper_calculate_sps(seq, i);             // sps speed on the current axis
-        if ( internal_diff( crt_speed, start_speed[i] ) > STEP_P_SEC_NOACC )
-            need_accel = true;
-
-        // calculate speed for the next sequence and check if deceleration is needed
-        if ( next_seq )
-            next_speed = internal_run_helper_calculate_sps(next_seq, i);   // sps for the next sequence
-        else
-            next_speed = 0;
-
-        if ( internal_diff( crt_speed, next_speed ) > STEP_P_SEC_NOACC )
-        {
-            need_decel = true;
-            start_speed[i] = 0;     // save 0 start speed for the next sequence since we decelerate
-        }
-        else
-            start_speed[i] = crt_speed;
-
-        DASSERT( core.status.op.go_to.StepCkInc[i] >= (1LL<<FP32) );
-        core.status.op.go_to.StepCkCntr[i] = core.status.op.go_to.StepCkInc[i];
-    }
 
     core.status.is_running = true;
     core.status.crt_seq = *seq;
     core.status.op.go_to.Tctr = 0;
 
-    // calculate acceleration
-    if ( need_accel )
-    {
-        // acceleration is done from and to STEP_P_SEC_NOACC / 2
-        //  a = (v- v0) / t
-        //  2.5mm/s -> 6mm/s in 0.100s time - this means: 0.1step/sys clock tick  -> 0.24 step/tick in 1000ticks (0.1sec) interval:  a = 0.24-0.1 / 1000 = 0.00014
-        // 
-        // for ramp up:
-        //   start up with 0.1step/tb, acceleration = 0.00014
-        //   vcrt = 0.1 + a * t   -- need to reach v
-        // 
-        //   step time on an axis:
-        //      txorg = L / ( v * Dx )
-        //      txcrt = L / ( vcrt * Dx ) = L / (Dx * (0.1+0.00014*t))
-        //      
-        //      txcrt = f * txorg
-        //      f = txcrt / txorg = v / (0.1+0.00014*t)         - but we have the speed V in steps per second, the denominator is calculated in steps/sys tick
-        //      f = v / (10000 * (0.1+0.00014*t)) =
-        //        = v / (1000 + 1.4*t )
-        // 
-        //      txcrt = txorg * (v  / (1000 + 1.4*t ) )         - used in polling routine to calculate the timind for the next step
-        //  
-        //  test 1: axis X only, V = 300
-        //      V = 300 -> vstep = 2000 steps/sec
-        //      txorg = 0.2
-        //      - T=0:      f = 2,  => txcrt = f*txorg = 0.4 - double time / half speed => 1000 steps/sec -> 150mm/m
-        //      - T=500:    f = 1.176
-        // 
-        //      V = 500 -> vstep = 3333 steps/sec
-        //      txorg = 0.333
-        //      - T=0:      f = 2,  => txcrt = f*txorg = 0.4 - double time / half speed => 1000 steps/sec -> 150mm/m
-        //      - T=500:    f = 1.176
-
-        core.status.op.go_to.need_acc = true;
-        core.status.op.go_to.op_phase = GOTO_PHASE_ACCEL;
-
-    }
-    else
-    {
-        core.status.op.go_to.op_phase = GOTO_PHASE_CT;
-    }
-
-
-
     return;
 }
 
 
-void internal_run_hold_time( struct SMotionFifoElement *seq )
+void internal_seqpoll_run_hold_time( struct SMotionFifoElement *seq )
 {
 
 }
 
 
-void internal_run_spindle_speed( struct SMotionFifoElement *seq )
+void internal_seqpoll_run_spindle_speed( struct SMotionFifoElement *seq )
 {
 
 }
 
 
 
-static void internal_seq_run( struct SMotionFifoElement *seq )
+static void internal_seqpoll_run( struct SMotionFifoElement *seq )
 {
     switch ( seq->seqType )
     {
         case SEQ_TYPE_GOTO:
-            internal_run_goto( seq );
+            internal_seqpoll_run_goto( seq );
             break;
         case SEQ_TYPE_HOLD:
-            internal_run_hold_time( seq );
+            internal_seqpoll_run_hold_time( seq );
             break;
         case SEQ_TYPE_SPINDLE:
-            internal_run_spindle_speed( seq );
+            internal_seqpoll_run_spindle_speed( seq );
             break;
     }
-
-}
-
-
-
-static uint64 internal_acceleration_factor( uint64 tstep_org )
-{
-    //      txcrt = txorg * (v  / (1000 + 1.4*t ) )         - used in polling routine to calculate the timind for the next step
-    if ( core.status.op.go_to.op_phase == GOTO_PHASE_ACCEL )
-    {
-        uint64 factor;
-        factor = ((uint64)(core.status.crt_seq.params.go_to.speed) << FP32) / (( (ACC_START_SPEED << FP32) + ACC_FACTOR_FP32 * (uint64)core.status.op.go_to.Tctr ) >> FP32 );
-        if ( factor <= ( 1LL << FP32 ) )
-        {
-            core.status.op.go_to.op_phase = GOTO_PHASE_CT;
-            return tstep_org;
-        }
-        return ((tstep_org >> 16) * (factor >> 16));            // multiply FP32 =  ( a * b ) >> 32 - but this doesn't fit in 64bit  
-    }
-    else
-        return tstep_org;
 
 }
 
 
 static inline void internal_seqpoll_goto( void )
 {
-    if ( stepper_getQ() >= MAX_ISR_STEPS )
-        return;
+    if ( stepper_check_action_busy() )  // stepping action in wait list
+        return;                         // - do nothing
 
-    uint32 endmask = 0;
-    uint32 stepmask = 0;
-    uint64 Tctr_fp32;
-    int i;
-
-    // increment sysclock counter
-    core.status.op.go_to.Tctr++;
-    Tctr_fp32 = ((uint64)core.status.op.go_to.Tctr << FP32);
-
-    // for each axis
-    for (i=0; i<CNC_MAX_COORDS; i++)
-    {
-        // check if endpoint is not reached
-        if ( core.crt_coord.coord[i] != core.status.crt_seq.params.go_to.coord.coord[i] )   // end point not reached by this axis
-        {
-            // if we can step on this axis
-            if ( Tctr_fp32 >= core.status.op.go_to.StepCkCntr[i] )          // proposed step time reached
-            {
-                // mark the step clock for this sysclock tick and step the soft coordinate also
-                stepmask |= (1<<i);
-                core.crt_coord.coord[i] += (core.status.crt_seq.params.go_to.dirmask & (1 << i)) ? 1 : -1;
-                // set up the next stepping point
-                core.status.op.go_to.StepCkCntr[i]  += internal_acceleration_factor( core.status.op.go_to.StepCkInc[i] );
-            }
-        }
-        else
-        {
-            endmask |= ( 1 << i );
-        }
-    }
-    if ( endmask != CNC_MAX_COORDMASK )  // if there still are working coordinates then proceed with step clock generation
-    {
-        // insert step clock
-        stepper_insert_clock( stepmask, core.status.crt_seq.params.go_to.dirmask );
-    }
-    else
-    {
         // finish current sequence
         // TODO - start up the next one if available
-        core.status.is_running = false;
+//        core.status.is_running = false;
 
-
-    }
 }
 
 
@@ -430,7 +749,7 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
         struct SMotionFifoElement seq;
         if ( internal_seq_fifo_get( &seq ) == 0 )
         {
-            internal_seq_run( &seq );
+            internal_seqpoll_run( &seq );
         }
     }
 
@@ -448,7 +767,7 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
 void motion_init( void )
 {
     memset( &core, 0, sizeof(core) );
-
+    memset( &isr, 0, sizeof(isr) );
 }
 
 
@@ -485,14 +804,13 @@ bool motion_pwr_is_set( uint32 axis )
 
 void motion_set_crt_coord( struct SStepCoordinates *coord )
 {
-    core.crt_coord = *coord;
     stepper_set_coord( coord );
 }
 
 
 void motion_get_crt_coord( struct SStepCoordinates *coord )
 {
-    *coord = core.crt_coord;
+    stepper_get_coord( coord )
 }
 
 
@@ -504,35 +822,25 @@ void motion_set_max_travel( struct SStepCoordinates *coord )
 
 int motion_step( uint32 axis, uint32 dir )
 {
-
     if ( core.status.is_running )
         return -1;
 
-    while ( stepper_getQ() );
+    while ( isr.ckmask );
+
+    // we can use directly the the isr coordinate values because there is no action in progress
 
     if ( dir )
     {
-        if ( (core.crt_coord.coord[axis] < core.max_travel.coord[axis]) || (core.max_travel.coord[axis] == 0) )
-        {
-            core.crt_coord.coord[axis]++;
-            stepper_insert_clock( (1<<axis), (1<<axis) );
-        }
+        if ( (isr.crt_poz.coord[axis] < core.max_travel.coord[axis]) || (core.max_travel.coord[axis] == 0) )
+            stepper_insert_step( (1<<axis), (1<<axis) );
     }
     else
     {
-        if ( (core.crt_coord.coord[axis] > 0) || (core.max_travel.coord[axis] == 0) )
+        if ( (isr.crt_poz.coord[axis] > 0) || (core.max_travel.coord[axis] == 0) )
         {
-            if (core.crt_coord.coord[axis] > 0)           // if non-zero coordinate - just decrement it with one step
-                core.crt_coord.coord[axis]--;
-            else
-            {
-                struct SStepCoordinates coord;      // for zero coordinate value - increase the hw. axis to avoid uint wraparround
-                stepper_get_coord( &coord );
-                coord.coord[axis] = 1;
-                stepper_set_coord( &coord );
-            }
-
-            stepper_insert_clock( (1<<axis), 0 );
+            if (isr.crt_poz.coord[axis] == 0 )      // if zero coordinate - do an increment to prevent negative wrap arround
+                isr.crt_poz.coord[axis]++;              
+            stepper_insert_step( (1<<axis), 0 );
         }
     }
 
@@ -556,11 +864,10 @@ int motion_sequence_insert( struct SMotionSequence *seq )
     {
         // for motion sequence we need to precalculate the parameters
         if ( core.seq_fifo.pcoord_updated == 0 )
-        {
-            core.seq_fifo.pcoord = core.crt_coord;          // update the end coordinates with the current soft coordinate
+        {                                                   // if first run after a stop/flush
+            stepper_get_coord( &core.seq_fifo.pcoord );     // update the end coordinates with the current coordinate
             core.seq_fifo.pcoord_updated = 1;
         }
-        fseq->params.go_to.coord = seq->params.go_to.coord;
         internal_sequence_precalculate( seq, fseq );
         core.seq_fifo.pcoord = seq->params.go_to.coord;     // save the end coordinates of the introduced sequence
     }
