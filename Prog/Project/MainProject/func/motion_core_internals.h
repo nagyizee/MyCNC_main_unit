@@ -17,7 +17,7 @@
         uint32 Stp_crt[CNC_MAX_COORDS];         // current speed - fractional to 32:32fp format (or start speed)
         uint32 Stp_ct[CNC_MAX_COORDS];          // constant speed - fractional to 32:32fp format
         uint32 Acc[CNC_MAX_COORDS];             // acceleration increments on each axis ( steps/stepck^2 ) given in FP42 held in 32bit container
-        uint64 accdec[2];                       // [0] - accelerate to this distance point, [1] - decelerate from this point
+        uint64 accdec[2];                       // [0] - accelerate to this distance point, [1] - decelerate from this point - it is in FP32
         uint32 accsens;                         // bit 0 -> beginning 1-positive 0-negative, bit 1 -> ending 1-positive 0-negative 
     };
 
@@ -28,8 +28,8 @@
         struct SMotionCoreActionCommon     p;   // parameters
 
         uint8 channel_active;                   // Bit 1 means that we have movement on the corresponding coordinate, 0 - if no movement on coordinate
-        uint8 dir_mask;                         // direction mask ( 1- plus, 0- minus )
         uint8 ax_max_dist;                      // axis index with maximum distance - acceleration / constant / deceleration points are given on this
+        uint8 dir_mask;                         // direction mask ( 1- plus, 0- minus )
         uint8 reserved;
     };                                          // - total: 44bytes
 
@@ -65,35 +65,13 @@
     #define GOTO_PHASE_DECEL    2
 
 
-    struct SMotionGotoOp
-    {
-        uint32  dirmask;                        // bitmask with directions
-        uint32  Tctr;                           // systime loop counter in Int
-        uint64  Ttot;                           // total runtime in fp32
-        uint64  StepCkInc[CNC_MAX_COORDS];      // sysclock increments for each steps
-        uint64  StepCkCntr[CNC_MAX_COORDS];     // sysclock for the next step
-        int32 prev_speeds[CNC_MAX_COORDS];      // axis speeds from the previous sequence
-        bool    need_acc;
-        bool    need_dec;
-        uint32  op_phase;                       // operation phase on goto sequence: accelerate, decelerate, constant               
-
-    };
-
-
-    union UMotionOperation
-    {
-        struct SMotionGotoOp    go_to;
-
-
-    };
 
     struct SMotionStatus
     {
         bool is_running;                        // sequencer is running an active sequence ( busy state )
         bool is_started;                        // sequencer is started
 
-        struct SMotionFifoElement  crt_seq;     // sequence currently in run
-        union UMotionOperation     op;
+        struct SMotionFifoElement  crt_seq;     // sequence currently in run in ISR
     };
 
 
@@ -115,9 +93,11 @@
     {
         struct SMotionCoreActionCommon  p;      // parameters
 
-        uint32 channel_active;                  // Bit 1 means that we have movement on the corresponding coordinate, 0 - if no movement on coordinate
-        int ax_max_dist;                        // axis index with maximum distance - acceleration / constant / deceleration points are given on this
+        uint32 channel_active;                  // Bit 1 means that we have movement on the corresponding coordinate, 0 - if no movement on coordinate.
+                                                //      it is used also to signal the application about finishing the action: if 0 - means that action is finished
+        uint32 ax_max_dist;                     // axis index with maximum distance - acceleration / constant / deceleration points are given on this
         uint32 dir_mask;                        // direction mask ( 1- plus, 0- minus )
+        uint32 seq_id;                          // sequence ID ( identifies the currently working sequence )
     };
 
 
@@ -125,6 +105,8 @@
     {
         uint64  D[CNC_MAX_COORDS];              // distance in 32:32fp - the upper part is the step integer part, the lower part is the fractional part
         uint32  Dprev[CNC_MAX_COORDS];
+        uint64  ctr_speed64[CNC_MAX_COORDS];    // current speed in fp64. We need the extra precision for small acceleration accumulation
+
     };
 
 

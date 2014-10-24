@@ -170,7 +170,7 @@ static inline void local_isr_step_channel( int i )
         if ( isr.crt_action.p.dest_poz.coord[i] == isr.crt_poz.coord[i] )
             isr.crt_action.channel_active &= ~(1 << i);
 
-        isr.op.Dprev[i] = (uint32)( isr.op.D[i] >> 32 );                // save for the half period
+        isr.op.Dprev[i] = (uint32)( isr.op.D[i] >> 32 );                // save for recognizing the next step
         isr.ckoff[i] = STEP_CKOFF;
         isr.ckmask |= ( 1 << i );
     }
@@ -196,33 +196,51 @@ static inline void local_isr_step_turn_channel_off( int i )
 static inline void local_isr_recalculate_speeds( void )
 {
     // recalculate speeds
+    bool accsens;
 
     // acceleration
-    if ( (isr.state == MCISR_STATUS_RUP) &&             // if accelerating
+    if ( isr.state == MCISR_STATUS_RUP )             // if accelerating
     {
-        if (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[0]) ) // and max. acceleration point is reached
+        if (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[0]) // and max. acceleration point is reached
+        {
+            int i;
+            // set state to constant and (for accuracy) set up calculated constant speeds
             isr.state = MCISR_STATUS_CT;
-        else
-        {   
-            // recalculate speeds for acceleration on each axis
-    
+            for (i=0; i<CNC_MAX_COORDS; i++)
+            {
+                isr.op.p.Stp_crt[i] = isr.crt_action.p.Stp_ct[i];
+                isr.op.ctr_speed64[i] = (uint64)isr.crt_action.p.Stp_ct[i] << 32LL;
+            }
+            return;
         }
-
+        accsens = isr.crt_action.p.accsens & 0x01;      // direction for start phase
+    }
+    else
+    {       
+        accsens = isr.crt_action.p.accsens & 0x02;      // direction for end phase
     }
 
     // constant
-    if ( (isr.state == MCISR_STATUS_CT) &&              // if constant (or just finished accelerating)
-         (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[1]) )   // and deceleration point is reached
+    if ( isr.state == MCISR_STATUS_CT )                 // if constant (or just finished accelerating)
     {
-        isr.state = MCISR_STATUS_RDOWN;
+        if (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[1])   // and deceleration point is reached
+            isr.state = MCISR_STATUS_RDOWN;
+        return;
     }
 
-    // deceleration
-    if ( isr.state == MCISR_STATUS_RDOWN )
+    // if it is still inside of routine - means that we accelerate or decelerate - calculate speeds
     {
+        int i;
+        for (i=0; i<CNC_MAX_COORDS; i++)
+        {
+            if ( accsens )
+                isr.op.ctr_speed64[i] += (uint64)isr.crt_action.p.Acc[i] << 22LL;       // Acc is FP42 make it FP64
+            else if (isr.op.ctr_speed64[i] > ((uint64)isr.crt_action.p.Acc[i] << 22LL) )
+                isr.op.ctr_speed64[i] -= (uint64)isr.crt_action.p.Acc[i] << 22LL;       // Acc is FP42 make it FP64
 
+            isr.op.p.Stp_crt[i] = isr.op.ctr_speed64 >> 32LL;
+        }
     }
-
 }
 
 
@@ -259,6 +277,10 @@ static void local_isr_peek_next_action( void )
     memset( &isr.op, 0, sizeof(isr.op) );
 
     isr.state = MCISR_STATUS_RUP;
+    for (i=0; i<CNC_MAX_COORDS; i++)
+    {
+        isr.op.ctr_speed64[i] = (uint64)isr.crt_action.p.Stp_crt << 32LL;
+    }
 
     // set up motor directions
     local_isr_set_directions( isr.crt_action.dir_mask );
@@ -341,9 +363,9 @@ int     stepper_add_action( struct SMotionCoreISRaction *action )
     __enable_interrupt();
 }
 
-#define stepper_check_action_busy()     ( isr.next_action.channel_active )
+#define stepper_check_action_busy()     ( isr.crt_action.channel_active )       // do not do double buffering - check always the current action
 
-#define stepper_check_in_progress()     ( irs.status )
+#define stepper_check_in_progress()     ( isr.next_action.channel_active || isr.crt_action.channel_active )
 
 void    stepper_stop_and_clear()
 {
@@ -504,7 +526,12 @@ static uint32 internal_calculate_acc_dist_fp16( uint32 v1, uint32 v2 )
 }
 
 
-static inline int internal_calculate_accdec_distances( struct SMotionSequence *mseq, struct SMotionFifoElement *fseq, uint64 L, uint32 *dists )
+static inline int internal_calculate_accdec_distances( struct SMotionFifoElement *fseq, 
+                                                       uint64 L, 
+                                                       uint32 *dists,
+                                                       uint32 startspeed,
+                                                       uint32 stepspeed,
+                                                       uint32 endspeed )
 {
     uint32  i1;
     uint32  i2;
@@ -512,10 +539,10 @@ static inline int internal_calculate_accdec_distances( struct SMotionSequence *m
     int64   D_i2;   // (total distance - i2) in FPlen
 
     // check validity D (Vfs-Vfe) should be <= D  
-    if ( mseq->params.go_to.feed_bgn <= mseq->params.go_to.feed_end )
-        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_bgn, mseq->params.go_to.feed_end );
+    if ( startspeed <= endspeed )
+        i1 = internal_calculate_acc_dist_fp16( startspeed, endspeed );
     else
-        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_end, mseq->params.go_to.feed_bgn );
+        i1 = internal_calculate_acc_dist_fp16( endspeed, startspeed );
 
     if ( i1 >= (uint32)( L >> (FPlen-16) ) )
         return -1;      // ERROR - should not happen
@@ -525,24 +552,24 @@ static inline int internal_calculate_accdec_distances( struct SMotionSequence *m
 
     // calculate start acceleration
     fseq->params.go_to.p.accsens = 0;
-    if ( mseq->params.go_to.feed_bgn < mseq->params.go_to.feed_speed )
+    if ( startspeed < stepspeed )
     {
-        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_bgn, mseq->params.go_to.feed_speed );
+        i1 = internal_calculate_acc_dist_fp16( startspeed, stepspeed );
         fseq->params.go_to.p.accsens |= 0x01;   // bit 0 - set to '1' - means it accelerate (positive acceleration)
     }
-    else if ( mseq->params.go_to.feed_bgn > mseq->params.go_to.feed_speed )
-        i1 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_speed, mseq->params.go_to.feed_bgn );
+    else if ( startspeed > stepspeed )
+        i1 = internal_calculate_acc_dist_fp16( stepspeed, startspeed );
     else
         fseq->params.go_to.p.accdec[0] = 0;     // no acceleration
 
     // calculate end acceleration
-    if ( mseq->params.go_to.feed_speed < mseq->params.go_to.feed_end )
+    if ( stepspeed < endspeed )
     {
-        i2 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_speed, mseq->params.go_to.feed_end );
+        i2 = internal_calculate_acc_dist_fp16( stepspeed, endspeed );
         fseq->params.go_to.p.accsens |= 0x02;   // bit 1 - set to '1' - means it accelerate (positive acceleration)
     }
-    else if ( mseq->params.go_to.feed_speed > mseq->params.go_to.feed_end )
-        i2 = internal_calculate_acc_dist_fp16( mseq->params.go_to.feed_end, mseq->params.go_to.feed_speed );
+    else if ( stepspeed > endspeed )
+        i2 = internal_calculate_acc_dist_fp16( endspeed, stepspeed );
     else
         fseq->params.go_to.p.accdec[1] = ( (uint64)dists[fseq->params.go_to.ax_max_dist] << 32 );   // no acceleration - set acceleration bgn. point to the longest distance
 
@@ -585,8 +612,9 @@ static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct 
     uint64 sum = 0LL;
     int i;
     uint64 L = 0;
-    RMuint32 stepspeed;
-    RMuint32 startspeed;
+    uint32 stepspeed;
+    uint32 startspeed;
+    uint32 endspeed;
 
     // get the distances and direction on each axis
     dirmask = 0;
@@ -619,6 +647,10 @@ static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct 
         startspeed = internal_calculate_stepspeed( mseq->params.go_to.feed_bgn ); 
     else
         startspeed = stepspeed;
+    if ( mseq->params.go_to.feed_speed != mseq->params.go_to.feed_end )
+        endspeed = internal_calculate_stepspeed( mseq->params.go_to.feed_end ); 
+    else
+        endspeed = stepspeed;
 
     DASSERT( (stepspeed & 0x80000000) == 0 );                                       // should never overrun 31 bits
     DASSERT( (startspeed & 0x80000000) == 0 );                                       // should never overrun 31 bits
@@ -644,98 +676,57 @@ static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct 
     }
 
     // Calculate acceleration/deceleration distances
-    if ( internal_calculate_accdec_distances( mseq, fseq, L, dists ) )
+    if ( internal_calculate_accdec_distances( fseq, L, dists, startspeed, stepspeed, endspeed ) )
         return -1;
 
     return 0;
 }
 
 
-static void internal_seqpoll_run_goto( struct SMotionFifoElement *seq )
+static inline void internal_seqpoll_run_goto( struct SMotionFifoElement *seq )
 {
-    // calculate the new action parameters and send to isr stepper
-    //
-    // stepping is controlled by speed/axis - where speed is given steps/sys clock ( always < 1 ) 
-    // which when added together at sysclock will give the distance made ( in 32:32fp )
-
     struct SMotionCoreISRaction action;
+    // do not introduce new action till isr didn't finished completely the current one
+    if ( stepper_check_action_busy() )
+        return;
 
-    
+    action.p = seq->params.go_to.p;
+    action.channel_active = seq->params.go_to.channel_active;
+    action.ax_max_dist = seq->params.go_to.ax_max_dist;
+    action.dir_mask = seq->params.go_to.dir_mask;
+    action.seq_id = seq->seqID;
 
-    uint32 *dists   = seq->params.go_to.distances;  // distances on each axis
-    uint32 max_dist = 0;
-    int i;
-
-    action.p.dest_poz = seq->params.go_to.coord;
-    action.dir_mask = seq->params.go_to.dirmask;
-
-
-
-
+    stepper_add_action( &action );
 
     core.status.is_running = true;
     core.status.crt_seq = *seq;
-    core.status.op.go_to.Tctr = 0;
-
     return;
 }
 
-
-void internal_seqpoll_run_hold_time( struct SMotionFifoElement *seq )
+static inline void internal_seqpoll_run_hold_time( struct SMotionFifoElement *seq )
 {
 
 }
 
-
-void internal_seqpoll_run_spindle_speed( struct SMotionFifoElement *seq )
+static inline void internal_seqpoll_run_spindle_speed( struct SMotionFifoElement *seq )
 {
 
 }
-
-
-
-static void internal_seqpoll_run( struct SMotionFifoElement *seq )
-{
-    switch ( seq->seqType )
-    {
-        case SEQ_TYPE_GOTO:
-            internal_seqpoll_run_goto( seq );
-            break;
-        case SEQ_TYPE_HOLD:
-            internal_seqpoll_run_hold_time( seq );
-            break;
-        case SEQ_TYPE_SPINDLE:
-            internal_seqpoll_run_spindle_speed( seq );
-            break;
-    }
-
-}
-
-
-static inline void internal_seqpoll_goto( void )
-{
-    if ( stepper_check_action_busy() )  // stepping action in wait list
-        return;                         // - do nothing
-
-        // finish current sequence
-        // TODO - start up the next one if available
-//        core.status.is_running = false;
-
-}
-
-
 
 
 
 static void internal_sequencer_poll( struct SEventStruct *evt )
 {
-
+    // if sequence is in run - keep it working
     if ( core.status.is_running )
     {
         switch ( core.status.crt_seq.seqType )
         {
             case SEQ_TYPE_GOTO:
-                internal_seqpoll_goto();
+                if ( stepper_check_in_progress() == false )  // stepping action is finished (and no new one initiated)
+                {
+                    core.status.is_running = false;
+                }
                 break;
             case SEQ_TYPE_HOLD:
                 break;
@@ -743,18 +734,27 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
                 break;
         }
     }
-    // if terminated or it isn't running
+    // if terminated or it isn't running 
     if ( core.status.is_running == false )
     {
+        // start the next sequence 
         struct SMotionFifoElement seq;
         if ( internal_seq_fifo_get( &seq ) == 0 )
         {
-            internal_seqpoll_run( &seq );
+            switch ( seq->seqType )
+            {
+                case SEQ_TYPE_GOTO:
+                    internal_seqpoll_run_goto( seq );
+                    break;
+                case SEQ_TYPE_HOLD:
+                    internal_seqpoll_run_hold_time( seq );
+                    break;
+                case SEQ_TYPE_SPINDLE:
+                    internal_seqpoll_run_spindle_speed( seq );
+                    break;
+            }
         }
     }
-
-
-
 }
 
 

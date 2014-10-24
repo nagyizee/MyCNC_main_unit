@@ -19,9 +19,9 @@
     struct SMS_Goto
     {
         struct SStepCoordinates coord;     // coordinate to go to
-        TFeedSpeed feed_speed;             // feed speed in steps/sec - constant cutting speed
-        TFeedSpeed feed_bgn;               // feed speed in steps/sec - speed at the sequence start
-        TFeedSpeed feed_end;               // feed speed in steps/sec - speed to be reached at sequence end
+        TFeedSpeed feed_speed;             // feed speed in mm/min - constant cutting speed
+        TFeedSpeed feed_bgn;               // feed speed in mm/min - speed at the sequence start
+        TFeedSpeed feed_end;               // feed speed in mm/min - speed to be reached at sequence end
     };
 
     // motion sequence element
