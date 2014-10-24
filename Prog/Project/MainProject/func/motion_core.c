@@ -114,9 +114,15 @@
 #include <string.h>
 #include <math.h>
 #include "motion_core.h"
+#include "hw_stuff.h"
 #include "motion_core_internals.h"
 #include "events_ui.h"
 
+
+#ifdef ON_QT_PLATFORM
+static struct STIM1 stim;
+static struct STIM1 *TIM1 = &stim;
+#endif
 
 
 #define FP32      32
@@ -208,7 +214,7 @@ static inline void local_isr_recalculate_speeds( void )
             isr.state = MCISR_STATUS_CT;
             for (i=0; i<CNC_MAX_COORDS; i++)
             {
-                isr.op.p.Stp_crt[i] = isr.crt_action.p.Stp_ct[i];
+                isr.crt_action.p.Stp_crt[i] = isr.crt_action.p.Stp_ct[i];
                 isr.op.ctr_speed64[i] = (uint64)isr.crt_action.p.Stp_ct[i] << 32LL;
             }
             return;
@@ -238,7 +244,7 @@ static inline void local_isr_recalculate_speeds( void )
             else if (isr.op.ctr_speed64[i] > ((uint64)isr.crt_action.p.Acc[i] << 22LL) )
                 isr.op.ctr_speed64[i] -= (uint64)isr.crt_action.p.Acc[i] << 22LL;       // Acc is FP42 make it FP64
 
-            isr.op.p.Stp_crt[i] = isr.op.ctr_speed64 >> 32LL;
+            isr.crt_action.p.Stp_crt[i] = isr.op.ctr_speed64[i] >> 32LL;
         }
     }
 }
@@ -270,7 +276,7 @@ static void local_isr_set_directions( uint32 dir )
 
 static void local_isr_peek_next_action( void )
 {
-    uint32 dir;
+    int i;
     isr.crt_action = isr.next_action;       // copy the action struct
     isr.next_action.channel_active = 0;     // mark the user level action struct as free
 
@@ -279,7 +285,7 @@ static void local_isr_peek_next_action( void )
     isr.state = MCISR_STATUS_RUP;
     for (i=0; i<CNC_MAX_COORDS; i++)
     {
-        isr.op.ctr_speed64[i] = (uint64)isr.crt_action.p.Stp_crt << 32LL;
+        isr.op.ctr_speed64[i] = ((uint64)isr.crt_action.p.Stp_crt[i]) << 32LL;
     }
 
     // set up motor directions
@@ -311,7 +317,8 @@ void StepTimerIntrHandler (void)
         if ( isr.crt_action.channel_active == 0 )
         {
             isr.state = MCISR_STATUS_IDLE;
-            local_isr_peek_next_action();
+            if ( isr.next_action.channel_active )
+                local_isr_peek_next_action();
         }
     }
     else
@@ -320,8 +327,15 @@ void StepTimerIntrHandler (void)
         if ( isr.next_action.channel_active )
             local_isr_peek_next_action();
         // check if clock pulse should be deactivated
-        if ( isr.ckmask & (1 << i) )
-            local_isr_step_turn_channel_off(i);
+        if ( isr.ckmask )
+        {
+            int i;
+            for ( i=0; i<CNC_MAX_COORDS; i++ )
+            {
+                if ( isr.ckmask & (1 << i) )
+                    local_isr_step_turn_channel_off(i);
+            }
+        }
     }
     
     ISR_counter++;
@@ -392,7 +406,7 @@ void    stepper_insert_step( uint32 coords, uint32 dirmask )
     if ( coords & (1 << COORD_A) )
         HW_StepClk_A();
 
-    for ( i=0; i<CNC_MAX_COORD; i++ )
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
         if ( coords & (1 << i) )
         {
@@ -625,16 +639,21 @@ static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct 
                                                        &dists[i] ) << i );
     }
     fseq->params.go_to.dir_mask = (uint8)dirmask;
-    fseq->params.go_to.p.dest_poz = seq->params.go_to.coord;
+    fseq->params.go_to.p.dest_poz = mseq->params.go_to.coord;
 
     // Calculate the total distances
     // L = sqrt( x*x + y*y + z*z + a*a )
+    fseq->params.go_to.channel_active = 0;
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
         sum += ((uint64)dists[i]) * ((uint64)dists[i]);
-        if ( maxdist < dist[i] )
+        if ( dists[i] )
         {
-            maxdist = dist[i];
+            fseq->params.go_to.channel_active |= ( 1 << i );
+        }
+        if ( maxdist < dists[i] )
+        {
+            maxdist = dists[i];
             fseq->params.go_to.ax_max_dist = (uint8)i;
         }
     }
@@ -672,7 +691,7 @@ static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct 
         // Acc[i] = Dist[i] * ACCFACTOR / totalDist  + 10bit shift to have FP42
         // To get acceleration in FP42 must shift with 10 bit additional.   nominator bit count: 16 + 10 + 19 + 18 = 63;    the (16+10) + 16 gives the fp42
         // max error: 5steps / 500mm
-        fseq->params.go_to.p.Acc[i] = ( (((uint64)ACC_FACTOR) << (FPlen+10)) * dists[i] ) / L;   
+        fseq->params.go_to.p.Acc[i] = ( (((uint64)ACC_FACTOR_FP32) << (FPlen+10)) * dists[i] ) / L;
     }
 
     // Calculate acceleration/deceleration distances
@@ -741,16 +760,16 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
         struct SMotionFifoElement seq;
         if ( internal_seq_fifo_get( &seq ) == 0 )
         {
-            switch ( seq->seqType )
+            switch ( seq.seqType )
             {
                 case SEQ_TYPE_GOTO:
-                    internal_seqpoll_run_goto( seq );
+                    internal_seqpoll_run_goto( &seq );
                     break;
                 case SEQ_TYPE_HOLD:
-                    internal_seqpoll_run_hold_time( seq );
+                    internal_seqpoll_run_hold_time( &seq );
                     break;
                 case SEQ_TYPE_SPINDLE:
-                    internal_seqpoll_run_spindle_speed( seq );
+                    internal_seqpoll_run_spindle_speed( &seq );
                     break;
             }
         }
@@ -810,7 +829,7 @@ void motion_set_crt_coord( struct SStepCoordinates *coord )
 
 void motion_get_crt_coord( struct SStepCoordinates *coord )
 {
-    stepper_get_coord( coord )
+    stepper_get_coord( coord );
 }
 
 

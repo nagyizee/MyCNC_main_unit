@@ -121,7 +121,9 @@ static inline void ProcessApplication( struct SEventStruct *evmask )
         m.cmdID = lst & 0xff;
         m.seqID = 0;
         m.seqType = SEQ_TYPE_GOTO;
-        m.params.go_to.feed_bgn = mconv_mmpm_2_sps( speeds[lst] );
+        m.params.go_to.feed_bgn = speeds[lst];
+        m.params.go_to.feed_speed = speeds[lst];
+        m.params.go_to.feed_end = speeds[lst];
         m.params.go_to.coord = CoordList[lst];
         motion_sequence_insert( &m );
         motion_sequence_start();

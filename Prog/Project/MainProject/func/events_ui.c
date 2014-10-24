@@ -9,30 +9,7 @@
 //////////////////////////////////////////////////////////////////
 
 
-#ifdef ON_QT_PLATFORM
-static struct STIM1 stim;
-static struct STIM1 *TIM1 = &stim;
-#endif
-
 volatile struct SEventStruct events = { 0, };
-
-
-static struct SAxisControl
-{
-    struct SAxisData                // MAX_ISR_STEPS element step fifo from software
-    {
-        uint32   tick;              // clock bitmask
-        uint32   dir;               // direction bitmask.   1 - cws or plus, 0 - ccws or minus
-    } axis[MAX_ISR_STEPS];
-
-    struct SStepCoordinates Poz;    // hardware step counter. Reflects the current milling head position
-
-    uint32   wp;
-    uint32   rp;
-    uint32   c;
-    uint32   SavedTicks;            // saved clock bitmask used internally. set up at 50us when direction is set up, executed and cleared at 100us
-
-} AxisControl;
 
 
 static struct SLEDOperations
@@ -168,11 +145,11 @@ void LED_Op( uint32 led, enum ELED_operation op )
 
 struct SEventStruct Event_Poll(void)
 {
-    uint32  ev;
     struct SEventStruct evtemp = { 0, };
 
     // process main communication port events
 /*old
+    uint32  ev;
  *  ev = Uart_GetFlag( PORT_COM );
 
     if ( ev & UART_FLAG_EVENT_CHAR )
