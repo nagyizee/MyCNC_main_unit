@@ -280,6 +280,8 @@ static void local_isr_peek_next_action( void )
     isr.crt_action = isr.next_action;       // copy the action struct
     isr.next_action.channel_active = 0;     // mark the user level action struct as free
 
+    StepDBG_LineSegment( &isr.crt_poz, &isr.crt_action.p.dest_poz );
+
     memset( &isr.op, 0, sizeof(isr.op) );
 
     isr.state = MCISR_STATUS_RUP;
@@ -302,6 +304,8 @@ void StepTimerIntrHandler (void)
     {
         int i;
 
+        StepDBG_TickCount();
+
         for ( i=0; i<CNC_MAX_COORDS; i++ )
         {
             if ( isr.ckmask & (1 << i) )
@@ -317,6 +321,7 @@ void StepTimerIntrHandler (void)
         if ( isr.crt_action.channel_active == 0 )
         {
             isr.state = MCISR_STATUS_IDLE;
+            StepDBG_SegmentFinished();
             if ( isr.next_action.channel_active )
                 local_isr_peek_next_action();
         }
@@ -573,8 +578,6 @@ static inline int internal_calculate_accdec_distances( struct SMotionFifoElement
     }
     else if ( startspeed > stepspeed )
         i1 = internal_calculate_acc_dist_fp16( stepspeed, startspeed );
-    else
-        fseq->params.go_to.p.accdec[0] = 0;     // no acceleration
 
     // calculate end acceleration
     if ( stepspeed < endspeed )
@@ -584,8 +587,6 @@ static inline int internal_calculate_accdec_distances( struct SMotionFifoElement
     }
     else if ( stepspeed > endspeed )
         i2 = internal_calculate_acc_dist_fp16( endspeed, stepspeed );
-    else
-        fseq->params.go_to.p.accdec[1] = ( (uint64)dists[fseq->params.go_to.ax_max_dist] << 32 );   // no acceleration - set acceleration bgn. point to the longest distance
 
     // Note: L is in FPlen, i2 is in FP16
     D_i2 = (int64)L - (int64)( (uint64)i2 << (FPlen - FP16) );      // it is in FPlen
@@ -594,8 +595,6 @@ static inline int internal_calculate_accdec_distances( struct SMotionFifoElement
     // for the same acceleration direction
     if ( (fseq->params.go_to.p.accsens == 0x01) || (fseq->params.go_to.p.accsens == 0x02) ) // sign differs - accelerate/decelerate
     {
-        int64 D_i1;
-        
         if ( D_i1 > D_i2 )
         {
             // if  i1 >  i2 -> triangular:  calculate i3, D1 = D2 = i3  where i3 = (i1-i2)/2 + i2

@@ -66,6 +66,10 @@ void HW_ResetClk_Y();
 void HW_ResetClk_Z();
 void HW_ResetClk_A();
 
+void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *c2 );
+void StepDBG_SegmentFinished( void );
+void StepDBG_TickCount();
+
 // just a wrapper solution
 void main_entry(uint32 *stack_top);
 void main_loop(void);

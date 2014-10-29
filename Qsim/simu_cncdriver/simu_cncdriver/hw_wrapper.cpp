@@ -1,3 +1,4 @@
+#include <math.h>
 #include "mainw.h"
 #include "ui_mainw.h"
 #include "motion_core.h"
@@ -25,6 +26,16 @@ uint8 eeprom_cont[ EEPROM_SIZE ];
 struct SStepCoordinates hw_coords;
 bool dirs[CNC_MAX_COORDS] = { false, };
 
+struct SDebugStep
+{
+    FILE *log_file;
+    struct SStepCoordinates c1;
+    struct SStepCoordinates c2;
+    int step_count;
+    int tick_count;
+};
+
+struct SDebugStep dbg_step;
 
 void InitHW(void)
 {
@@ -108,28 +119,139 @@ void HW_SetDirA_Minus()
     dirs[COORD_A] = false;
 }
 
+
+
+
+struct SPoint
+{
+    double x;
+    double y;
+    double z;
+};
+
+struct SLine
+{
+    struct SPoint P0;
+    struct SPoint P1;
+};
+
+typedef SPoint TVector;
+
+#define dot(u,v)   ( u.x * v.x + u.y * v.y + u.z * v.z )
+#define norm(v)    sqrt(dot(v,v))     // norm = length of  vector
+#define dst(u,v)     norm(u-v)          // distance = norm of difference
+
+
+TVector vect_minus( TVector *v1, TVector *v2 )
+{
+    TVector v;
+    v.x = v1->x - v2->x;
+    v.y = v1->y - v2->y;
+    v.z = v1->z - v2->z;
+    return v;
+}
+
+TVector vect_plus( TVector *v1, TVector *v2 )
+{
+    TVector v;
+    v.x = v1->x + v2->x;
+    v.y = v1->y + v2->y;
+    v.z = v1->z + v2->z;
+    return v;
+}
+
+TVector vect_scalardot( double sc, TVector *v1 )
+{
+    TVector v;
+    v.x = v1->x * sc;
+    v.y = v1->y * sc;
+    v.z = v1->z * sc;
+    return v;
+}
+
+void point_setval( SPoint *p, struct SStepCoordinates *c )
+{
+    p->x = c->coord[COORD_X];
+    p->y = c->coord[COORD_Y];
+    p->z = c->coord[COORD_Z];
+}
+
+
+void StepDBG_AddPoint()
+{
+    double dist;
+
+    if ( dbg_step.log_file == NULL )
+        return;
+/* Calculate distance of the current step point from the theoretical 3D line defined
+ * by the start and end coordinates
+ *
+ *original code:
+ dist_Point_to_Line(Point P, Line L)
+{
+     Vector v = L.P1 - L.P0;
+     Vector w = P - L.P0;
+
+     double c1 = dot(w,v);
+     double c2 = dot(v,v);
+     double b = c1 / c2;
+
+     Point Pb = L.P0 + b * v;
+     return d(P, Pb);
+}
+    */
+
+    struct SPoint P;
+    struct SLine L;
+
+    point_setval( &P, &hw_coords );
+    point_setval( &L.P0, &dbg_step.c1 );
+    point_setval( &L.P1, &dbg_step.c2 );
+
+    TVector v = vect_minus( &L.P1, &L.P0 );
+    TVector w = vect_minus( &P,    &L.P0 );
+
+    double c1 = dot(w,v);
+    double c2 = dot(v,v);
+    double b = c1 / c2;
+
+    SPoint Psc = vect_scalardot( b , &v );
+    SPoint Pb = vect_plus( &L.P0 , &Psc );
+    TVector Vfinal = vect_minus( &P, &Pb );
+    dist = norm( Vfinal );                      //dst(P, Pb)  -> norm( P - Pb ) -> norm( vect minus( P, Pb )
+
+    dbg_step.step_count++;
+    fprintf( dbg_step.log_file, "    %06i,  %2.4lf, %s\n", dbg_step.step_count, dist, (dist > 1.0) ?  (dist > 2.0) ? "<--- 2" : "<--- 1" :" " );
+
+}
+
+
 void HW_StepClk_X()
 {
     hw_coords.coord[COORD_X] += dirs[COORD_X] ? 1 : -1;
     pClass->dispsim_add_point();
+    StepDBG_AddPoint();
 }
 
 void HW_StepClk_Y()
 {
     hw_coords.coord[COORD_Y] += dirs[COORD_Y] ? 1 : -1;
     pClass->dispsim_add_point();
+    StepDBG_AddPoint();
 }
 
 void HW_StepClk_Z()
 {
     hw_coords.coord[COORD_Z] += dirs[COORD_Z] ? 1 : -1;
     pClass->dispsim_add_point();
+    StepDBG_AddPoint();
 }
 
 void HW_StepClk_A()
 {
     hw_coords.coord[COORD_A] += dirs[COORD_A] ? 1 : -1;
     pClass->dispsim_add_point();
+    StepDBG_AddPoint();
 }
 
 void HW_StepClk_Reset() {  /*dummy*/  }
@@ -139,6 +261,34 @@ void HW_ResetClk_Z() {  /*dummy*/  }
 void HW_ResetClk_A() {  /*dummy*/  }
 
 
+void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *c2 )
+{
+    char filename[128];
+    sprintf( filename, "segment_line__%d-%d-%d__%d-%d-%d.log", c1->coord[0], c1->coord[1], c1->coord[2], c2->coord[0], c2->coord[1], c2->coord[2]);
+    dbg_step.log_file = fopen( filename, "w" );
+    if ( dbg_step.log_file )
+    {
+        dbg_step.step_count = 0;
+        dbg_step.tick_count = 0;
+        fprintf(dbg_step.log_file, "L: xyz[%06d,%06d,%06d] <-> xyz[%06d,%06d,%06d]\n", c1->coord[0], c1->coord[1], c1->coord[2], c2->coord[0], c2->coord[1], c2->coord[2]);
+        dbg_step.c1 = *c1;
+        dbg_step.c2 = *c2;
+    }
+}
+
+void StepDBG_SegmentFinished()
+{
+    if ( dbg_step.log_file )
+    {
+        fprintf(dbg_step.log_file, "\n");
+        fclose(dbg_step.log_file);
+    }
+}
+
+void StepDBG_TickCount()
+{
+    dbg_step.tick_count++;
+}
 
 
 ///////////////////////////////////////////////////
