@@ -16,12 +16,21 @@
 
     #define CMD_ID_INVALID         ((uint32)(-1))
 
+    enum EPowerLevel
+    {
+        mpwr_off = 0,           // power off the motor driver
+        mpwr_low,               // low power - set for sustaining position
+        mpwr_med,               // medium power - set for slow translation
+        mpwr_high,              // high power - set for normal translation / low acceleration
+        mpwr_full,              // full power - set for high translation / acceleration
+        mpwr_auto               // automatic power setting - motion core takes care of power level - recommended
+    };
+
+
     struct SMS_Goto
     {
-        struct SStepCoordinates coord;     // coordinate to go to
-        TFeedSpeed feed_speed;             // feed speed in mm/min - constant cutting speed
-        TFeedSpeed feed_bgn;               // feed speed in mm/min - speed at the sequence start
-        TFeedSpeed feed_end;               // feed speed in mm/min - speed to be reached at sequence end
+        struct SStepCoordinates coord;      // coordinate to go to
+        TFeedSpeed feed;                    // feed speed in mm/min - speed to be reached at sequence end
     };
 
     // motion sequence element
@@ -38,7 +47,6 @@
             uint32              hold;       // for SEQ_TYPE_HOLD
             // note#0001 : If other parameters are added or current prms are changed in this union, change the code in motion_core.c, search for "note#0001" in the code
         } params;
-
     };
 
 
@@ -49,20 +57,18 @@
     void motion_poll( struct SEventStruct *evt );
 
 
-    // Set axis power. power can have the following values:
-    //  0 - power off
-    //  1-4 power level.    4 is the maximum
+    // Force axis power. power can have the following values:
     // routine is async - wait for power setup for best result
-    void motion_pwr_ctrl( uint32 axis, uint32 power );
+    void motion_pwr_ctrl( uint32 axis, enum EPowerLevel power );
 
-    // gets the busy state - if returs true - power is set up
+    // gets the motor driver pwr state - if returs true - power is set up
     bool motion_pwr_is_set( uint32 axis );
 
-    // sets up the internal soft and hard coordinate counters
+    // sets up the stepper coordinate counters
     // - do not use this when executing movement
     void motion_set_crt_coord( struct SStepCoordinates *coord );
 
-    // get the current soft coordinates
+    // get the current stepper coordinates
     void motion_get_crt_coord( struct SStepCoordinates *coord );
 
     // Set up endpoint values. NULL will clear them
@@ -100,12 +106,8 @@
     void motion_sequence_start( void );
 
     // stop motion sequence - will produce an immediate halt if motion is in execution
-    // step fifo is flushed, soft coordinates are updated from hard coordinates
+    // step fifo and sequence fifo is flushed
     void motion_sequence_stop( void );
-
-    // clean up the sequence and motion fifos, if motion is in run it will stop it
-    // flushes both step and sequence fifos, soft coordinates are updated from hard coordinates
-    void motion_sequence_flush( void );
 
     // get the current command ID which is in execution, or the last command ID which was interrupted
     uint32 motion_sequence_crt_cmdID();
@@ -115,7 +117,7 @@
 
 
     // Scale the feed speed with +/- factor. Value is 0 - 500.
-    // 0 - no scale, +500 - speed up with x5, -500 - speed down with x5
+    // 0 - no scale, +200 - speed up with x2, -200 - speed down with x2
     // it applies the factor in progressive way, no need to wait for it
     void motion_feed_scale( int factor );
 

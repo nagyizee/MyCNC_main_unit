@@ -220,15 +220,18 @@ static inline void local_isr_recalculate_speeds( void )
             return;
         }
         accsens = isr.crt_action.p.accsens & 0x01;      // direction for start phase
+        StepDBG_Accelerations( 0, accsens );
     }
     else
     {       
         accsens = isr.crt_action.p.accsens & 0x02;      // direction for end phase
+        StepDBG_Accelerations( 2, accsens );
     }
 
     // constant
     if ( isr.state == MCISR_STATUS_CT )                 // if constant (or just finished accelerating)
     {
+        StepDBG_Accelerations( 1, 0 );
         if (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[1])   // and deceleration point is reached
             isr.state = MCISR_STATUS_RDOWN;
         return;
@@ -384,7 +387,7 @@ int     stepper_add_action( struct SMotionCoreISRaction *action )
 
 #define stepper_check_action_busy()     ( isr.crt_action.channel_active )       // do not do double buffering - check always the current action
 
-#define stepper_check_in_progress()     ( isr.next_action.channel_active || isr.crt_action.channel_active )
+#define stepper_check_in_progress()     ( isr.next_action.channel_active || isr.crt_action.channel_active )     // stepper ISR busy - running a current one + having a next one
 
 void    stepper_stop_and_clear()
 {
@@ -436,57 +439,60 @@ void    stepper_insert_step( uint32 coords, uint32 dirmask )
  *
  * *************************************************/
 
+/*------------------------------
+ *  Input sequence fifo routines
+ *----------------------------*/
 
-/*--------------------------
- *  Fifo routines
- *-------------------------*/
-
-static struct SMotionFifoElement *internal_seq_fifo_get_fill_pointer( void )
+static struct SMotionSequence *internal_sequence_fifo_get_fill_pointer( void )
 {
-    if ( core.seq_fifo.c >= MAX_SEQ_FIFO )
+    if ( core.sequence_fifo.c >= MAX_SEQ_FIFO )
         return NULL;
-    return &core.seq_fifo.seq[ core.seq_fifo.w ];
+    return &core.sequence_fifo.seq[ core.sequence_fifo.w ];
 }
 
 
-static int internal_seq_fifo_insert( struct SMotionFifoElement *seq )
+static int internal_sequence_fifo_insert( struct SMotionSequence *seq )
 {
-    if ( core.seq_fifo.c >= MAX_SEQ_FIFO )
+    if ( core.sequence_fifo.c >= MAX_SEQ_FIFO )
         return -1;
 
     if ( seq != NULL )
-        core.seq_fifo.seq[ core.seq_fifo.w ] = *seq;
+        core.sequence_fifo.seq[ core.sequence_fifo.w ] = *seq;
 
-    core.seq_fifo.w++;
+    core.sequence_fifo.w++;
 
-    if ( core.seq_fifo.w == MAX_SEQ_FIFO )
-        core.seq_fifo.w = 0;
-    core.seq_fifo.c++;
+    if ( core.sequence_fifo.w == MAX_SEQ_FIFO )
+        core.sequence_fifo.w = 0;
+    core.sequence_fifo.c++;
     return 0;
 }
 
 
-static int internal_seq_fifo_get( struct SMotionFifoElement *seq )
+static int internal_sequence_fifo_get( struct SMotionSequence *seq )
 {
-    if ( core.seq_fifo.c == 0 )
+    if ( core.sequence_fifo.c == 0 )
         return -1;
 
-    *seq = core.seq_fifo.seq[ core.seq_fifo.r++ ];
+    if ( seq )
+        *seq = core.sequence_fifo.seq[ core.sequence_fifo.r ];
+    core.sequence_fifo.r++;
 
-    if ( core.seq_fifo.r == MAX_SEQ_FIFO )
-        core.seq_fifo.r = 0;
-    core.seq_fifo.c--;
+    if ( core.sequence_fifo.r == MAX_SEQ_FIFO )
+        core.sequence_fifo.r = 0;
+    core.sequence_fifo.c--;
     return 0;
 }
 
 
-static int internal_seq_fifo_peek( struct SMotionFifoElement **seq, bool next )
+static int internal_sequence_fifo_peek( struct SMotionSequence **seq, bool next )
 {
     int idx;
-    if ( (core.seq_fifo.c == 0) || ( next && (core.seq_fifo.c == 1)) )
+
+    *seq = NULL;
+    if ( (core.sequence_fifo.c == 0) || ( next && (core.sequence_fifo.c == 1)) )
         return -1;
 
-    idx = core.seq_fifo.r;
+    idx = core.sequence_fifo.r;
     if ( next )
     {
         idx++;
@@ -494,22 +500,100 @@ static int internal_seq_fifo_peek( struct SMotionFifoElement **seq, bool next )
             idx = 0;
     }
 
-    *seq = &core.seq_fifo.seq[ idx ];
+    *seq = &core.sequence_fifo.seq[ idx ];
     return 0;
 }
 
 
-static void internal_seq_fifo_flush( void )
+static void internal_sequence_fifo_flush( void )
 {
-    core.seq_fifo.c = 0;
-    core.seq_fifo.w = 0;
-    core.seq_fifo.r = 0;
+    core.sequence_fifo.c = 0;
+    core.sequence_fifo.w = 0;
+    core.sequence_fifo.r = 0;
 }
 
 
-static inline int internal_seq_fifo_fullness( void )
+static inline int internal_sequence_fifo_fullness( void )
 {
-    return core.seq_fifo.c;
+    return core.sequence_fifo.c;
+}
+
+
+/*--------------------------
+ *  Output step fifo routines
+ *-------------------------*/
+
+static struct SStepFifoElement *internal_step_fifo_get_fill_pointer( void )
+{
+    if ( core.stepper_fifo.c >= MAX_STEP_FIFO )
+        return NULL;
+    return &core.stepper_fifo.stp[ core.stepper_fifo.w ];
+}
+
+
+static int internal_step_fifo_insert( struct SStepFifoElement *stp )
+{
+    if ( core.stepper_fifo.c >= MAX_STEP_FIFO )
+        return -1;
+
+    if ( stp != NULL )
+        core.stepper_fifo.stp[ core.stepper_fifo.w ] = *stp;
+
+    core.stepper_fifo.w++;
+
+    if ( core.stepper_fifo.w == MAX_STEP_FIFO )
+        core.stepper_fifo.w = 0;
+    core.stepper_fifo.c++;
+    return 0;
+}
+
+
+static int internal_step_fifo_get( struct SStepFifoElement *stp )
+{
+    if ( core.stepper_fifo.c == 0 )
+        return -1;
+
+    *stp = core.stepper_fifo.stp[ core.stepper_fifo.r++ ];
+
+    if ( core.stepper_fifo.r == MAX_STEP_FIFO )
+        core.stepper_fifo.r = 0;
+    core.stepper_fifo.c--;
+    return 0;
+}
+
+
+static int internal_step_fifo_peek( struct SStepFifoElement **stp, bool next )
+{
+    int idx;
+
+    *stp = NULL;
+    if ( (core.stepper_fifo.c == 0) || ( next && (core.stepper_fifo.c == 1)) )
+        return -1;
+
+    idx = core.stepper_fifo.r;
+    if ( next )
+    {
+        idx++;
+        if ( idx == MAX_STEP_FIFO )
+            idx = 0;
+    }
+
+    *stp = &core.stepper_fifo.stp[ idx ];
+    return 0;
+}
+
+
+static void internal_step_fifo_flush( void )
+{
+    core.stepper_fifo.c = 0;
+    core.stepper_fifo.w = 0;
+    core.stepper_fifo.r = 0;
+}
+
+
+static inline int internal_step_fifo_fullness( void )
+{
+    return core.stepper_fifo.c;
 }
 
 
@@ -545,7 +629,7 @@ static uint32 internal_calculate_acc_dist_fp16( uint32 v1, uint32 v2 )
 }
 
 
-static inline int internal_calculate_accdec_distances( struct SMotionFifoElement *fseq, 
+static inline int internal_calculate_accdec_distances( struct SStepFifoElement *fseq, 
                                                        uint64 L, 
                                                        uint32 *dists,
                                                        uint32 startspeed,
@@ -617,14 +701,75 @@ static inline int internal_calculate_accdec_distances( struct SMotionFifoElement
 }
 
 
-static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct SMotionFifoElement *fseq )
+static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSequence *crt_seq, struct SMotionSequence *next_seq, uint32 *feed_start, uint32 *feed_end )
+{
+    uint64 ret_val;
+    uint64 sum;
+    int i;
+
+    // check and calc for the current sequence
+    if ( core.status.motion.next_precalc == false ) // no precalculation from the previous step (peeked next sequence - which is the current one now)
+    {
+        sum = 0LL;
+        for ( i=0; i<CNC_MAX_COORDS; i++ )
+        {
+            uint32 dist;
+            internal_run_helper_get_distance( core.status.motion.pcoord.coord[i], crt_seq->params.go_to.coord.coord[i], &dist );
+            sum += ((uint64)dist) * ((uint64)dist);
+        }
+        ret_val = (uint64)( sqrt( sum ) * (1LL<<FPlen) );
+    }
+    else
+    {
+        ret_val = core.status.motion.next_L;
+        core.status.motion.next_precalc = false;
+    }
+
+    // check and calc for the next sequence
+    if ( next_seq && (next_seq->seqType == SEQ_TYPE_GOTO) )
+    {
+        sum = 0LL;
+        for ( i=0; i<CNC_MAX_COORDS; i++ )
+        {
+            uint32 dist;
+            internal_run_helper_get_distance( crt_seq->params.go_to.coord.coord[i], next_seq->params.go_to.coord.coord[i], &dist );
+            sum += ((uint64)dist) * ((uint64)dist);
+        }
+        core.status.motion.next_L = (uint64)( sqrt( sum ) * (1LL<<FPlen) );
+        core.status.motion.next_precalc = true;
+    }
+    else
+    {
+        core.status.motion.next_precalc = false;
+    }
+
+
+    // dummy solution - needs to be changed
+    if ( crt_seq->params.go_to.feed > 150 )
+    {
+        *feed_start = 150;
+        *feed_end = 150;
+    }
+    else 
+    {
+        *feed_start = crt_seq->params.go_to.feed;
+        *feed_end = crt_seq->params.go_to.feed;
+    }
+}
+
+
+
+static int internal_sequence_precalculate( struct SMotionSequence *crt_seq, struct SMotionSequence *next_seq, struct SStepFifoElement *pstep )
 {
     uint32 dists[CNC_MAX_COORDS];
     uint32 dirmask = 0;
     uint32 maxdist = 0;
-    uint64 sum = 0LL;
     int i;
     uint64 L = 0;
+
+    uint32 feed_start;
+    uint32 feed_end;
+
     uint32 stepspeed;
     uint32 startspeed;
     uint32 endspeed;
@@ -633,40 +778,39 @@ static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct 
     dirmask = 0;
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
-        dirmask |= ( internal_run_helper_get_distance( core.seq_fifo.pcoord.coord[i],
-                                                       mseq->params.go_to.coord.coord[i],
+        dirmask |= ( internal_run_helper_get_distance( core.status.motion.pcoord.coord[i],
+                                                       crt_seq->params.go_to.coord.coord[i],
                                                        &dists[i] ) << i );
     }
-    fseq->params.go_to.dir_mask = (uint8)dirmask;
-    fseq->params.go_to.p.dest_poz = mseq->params.go_to.coord;
+    pstep->params.go_to.dir_mask = (uint8)dirmask;
+    pstep->params.go_to.p.dest_poz = crt_seq->params.go_to.coord;
 
     // Calculate the total distances
     // L = sqrt( x*x + y*y + z*z + a*a )
-    fseq->params.go_to.channel_active = 0;
+    pstep->params.go_to.channel_active = 0;
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
-        sum += ((uint64)dists[i]) * ((uint64)dists[i]);
         if ( dists[i] )
         {
-            fseq->params.go_to.channel_active |= ( 1 << i );
+            pstep->params.go_to.channel_active |= ( 1 << i );
         }
         if ( maxdist < dists[i] )
         {
             maxdist = dists[i];
-            fseq->params.go_to.ax_max_dist = (uint8)i;
+            pstep->params.go_to.ax_max_dist = (uint8)i;
         }
     }
-                                                            
-    L = (uint64)( sqrt( sum ) * (1LL<<FPlen) );
+
+    L = internal_calculate_speeds_and_distance( crt_seq, next_seq, &feed_start, &feed_end );
 
     // Calculate stepspeed ( see explanation abowe )
-    stepspeed = internal_calculate_stepspeed( mseq->params.go_to.feed_speed );      // stepspeed in fp.32 - it will use 31 bit always
-    if ( mseq->params.go_to.feed_speed != mseq->params.go_to.feed_bgn )
-        startspeed = internal_calculate_stepspeed( mseq->params.go_to.feed_bgn ); 
+    stepspeed = internal_calculate_stepspeed( crt_seq->params.go_to.feed );      // stepspeed in fp.32 - it will use 31 bit always
+    if ( crt_seq->params.go_to.feed != feed_start )
+        startspeed = internal_calculate_stepspeed( feed_start ); 
     else
         startspeed = stepspeed;
-    if ( mseq->params.go_to.feed_speed != mseq->params.go_to.feed_end )
-        endspeed = internal_calculate_stepspeed( mseq->params.go_to.feed_end ); 
+    if ( crt_seq->params.go_to.feed != feed_end )
+        endspeed = internal_calculate_stepspeed( feed_end ); 
     else
         endspeed = stepspeed;
 
@@ -680,53 +824,100 @@ static int internal_sequence_precalculate( struct SMotionSequence *mseq, struct 
         // Problem is: stpspeedFP32 * dist * (1<<FPlen)  --->   31bit + 18bit + 19bit = 68bit - need to get rid of 4 bits
         // since stepspeed encoding can be done on 27 bit - change the formula:
         // axspeed = (( (stpspeedFP32) * dist ) * ( 1<<(FPlen-4))) / ( L >> 4 )
-        fseq->params.go_to.p.Stp_ct[i] = ( (((uint64)stepspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
+        pstep->params.go_to.p.Stp_ct[i] = ( (((uint64)stepspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
 
         if ( startspeed == stepspeed )
-            fseq->params.go_to.p.Stp_crt[i] = fseq->params.go_to.p.Stp_ct[i];
+            pstep->params.go_to.p.Stp_crt[i] = pstep->params.go_to.p.Stp_ct[i];
         else
-            fseq->params.go_to.p.Stp_crt[i] = ( (((uint64)startspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
+            pstep->params.go_to.p.Stp_crt[i] = ( (((uint64)startspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
 
         // Acc[i] = Dist[i] * ACCFACTOR / totalDist  + 10bit shift to have FP42
         // To get acceleration in FP42 must shift with 10 bit additional.   nominator bit count: 16 + 10 + 19 + 18 = 63;    the (16+10) + 16 gives the fp42
         // max error: 5steps / 500mm
-        fseq->params.go_to.p.Acc[i] = ( (((uint64)ACC_FACTOR_FP32) << (FPlen+10)) * dists[i] ) / L;
+        pstep->params.go_to.p.Acc[i] = ( (((uint64)ACC_FACTOR_FP32) << (FPlen+10)) * dists[i] ) / L;
     }
 
     // Calculate acceleration/deceleration distances
-    if ( internal_calculate_accdec_distances( fseq, L, dists, startspeed, stepspeed, endspeed ) )
+    if ( internal_calculate_accdec_distances( pstep, L, dists, startspeed, stepspeed, endspeed ) )
         return -1;
 
     return 0;
 }
 
 
-static inline void internal_seqpoll_run_goto( struct SMotionFifoElement *seq )
+static int internal_step_precalculator( void )
+{
+    // poll the input fifo, calculate and push the results in output fifo
+    // Since this routine is CPU intensive - schedule it's call once or less / main loop
+    struct SStepFifoElement *pstep;
+    struct SMotionSequence *crt_seq;
+    struct SMotionSequence *next_seq;
+
+    if ( core.status.is_started == false )
+        return 0;
+    if ( internal_sequence_fifo_fullness() == 0 )       // no elements in input fifo - nothing to calculate
+        return 0;
+    pstep = internal_step_fifo_get_fill_pointer();      // no space in output fifo - do not do anyhing
+    if ( pstep == NULL )
+        return 0;
+
+    internal_sequence_fifo_peek( &crt_seq, false );     // peek the current sequence pointer from input fifo
+    internal_sequence_fifo_peek( &next_seq, true );     // peek the next one for distance / speed / and angle info
+    internal_sequence_fifo_get( NULL );                 // dummy get to advance the read pointer            
+
+    pstep->cmdID = crt_seq->cmdID;
+    pstep->seqID = crt_seq->seqID;
+    pstep->seqType = crt_seq->seqType;
+
+    if ( crt_seq->seqType == SEQ_TYPE_GOTO )
+    {
+        // for motion sequence we need to precalculate the parameters
+        if ( core.status.motion.pcoord_updated == 0 )
+        {                                                        // if first run after a stop/flush
+            stepper_get_coord( &core.status.motion.pcoord );     // update the end coordinates with the current coordinate
+            core.status.motion.pcoord_updated = 1;
+        }
+
+        internal_sequence_precalculate( crt_seq, next_seq, pstep );
+        core.status.motion.pcoord = crt_seq->params.go_to.coord;     // save the end coordinates of the introduced sequence
+    }
+    else
+    {
+        // for the other sequences
+        pstep->params.spindle = crt_seq->params.spindle;
+        //location for note#0001 from motion_core_internals.h
+    }
+
+    return internal_step_fifo_insert( NULL );
+}
+
+
+static inline void internal_seqpoll_run_goto( struct SStepFifoElement *stp )
 {
     struct SMotionCoreISRaction action;
     // do not introduce new action till isr didn't finished completely the current one
     if ( stepper_check_action_busy() )
         return;
 
-    action.p = seq->params.go_to.p;
-    action.channel_active = seq->params.go_to.channel_active;
-    action.ax_max_dist = seq->params.go_to.ax_max_dist;
-    action.dir_mask = seq->params.go_to.dir_mask;
-    action.seq_id = seq->seqID;
+    action.p = stp->params.go_to.p;
+    action.channel_active = stp->params.go_to.channel_active;
+    action.ax_max_dist = stp->params.go_to.ax_max_dist;
+    action.dir_mask = stp->params.go_to.dir_mask;
+    action.seq_id = stp->seqID;
 
     stepper_add_action( &action );
 
     core.status.is_running = true;
-    core.status.crt_seq = *seq;
+    core.status.crt_stp = *stp;
     return;
 }
 
-static inline void internal_seqpoll_run_hold_time( struct SMotionFifoElement *seq )
+static inline void internal_seqpoll_run_hold_time( struct SStepFifoElement *stp )
 {
 
 }
 
-static inline void internal_seqpoll_run_spindle_speed( struct SMotionFifoElement *seq )
+static inline void internal_seqpoll_run_spindle_speed( struct SStepFifoElement *stp )
 {
 
 }
@@ -738,7 +929,7 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
     // if sequence is in run - keep it working
     if ( core.status.is_running )
     {
-        switch ( core.status.crt_seq.seqType )
+        switch ( core.status.crt_stp.seqType )
         {
             case SEQ_TYPE_GOTO:
                 if ( stepper_check_in_progress() == false )  // stepping action is finished (and no new one initiated)
@@ -756,19 +947,19 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
     if ( core.status.is_running == false )
     {
         // start the next sequence 
-        struct SMotionFifoElement seq;
-        if ( internal_seq_fifo_get( &seq ) == 0 )
+        struct SStepFifoElement stp;
+        if ( internal_step_fifo_get( &stp ) == 0 )
         {
-            switch ( seq.seqType )
+            switch ( stp.seqType )
             {
                 case SEQ_TYPE_GOTO:
-                    internal_seqpoll_run_goto( &seq );
+                    internal_seqpoll_run_goto( &stp );
                     break;
                 case SEQ_TYPE_HOLD:
-                    internal_seqpoll_run_hold_time( &seq );
+                    internal_seqpoll_run_hold_time( &stp );
                     break;
                 case SEQ_TYPE_SPINDLE:
-                    internal_seqpoll_run_spindle_speed( &seq );
+                    internal_seqpoll_run_spindle_speed( &stp );
                     break;
             }
         }
@@ -792,7 +983,10 @@ void motion_init( void )
 void motion_poll( struct SEventStruct *evt )
 {
     if ( core.status.is_started )
+    {
+        internal_step_precalculator();
         internal_sequencer_poll( evt );
+    }
 
 
 }
@@ -868,35 +1062,7 @@ int motion_step( uint32 axis, uint32 dir )
 
 int motion_sequence_insert( struct SMotionSequence *seq )
 {
-    struct SMotionFifoElement *fseq;
-
-    fseq = internal_seq_fifo_get_fill_pointer();
-    if ( fseq == NULL )
-        return -1;
-
-    fseq->cmdID = seq->cmdID;
-    fseq->seqID = seq->seqID;
-    fseq->seqType = seq->seqType;
-
-    if ( seq->seqType == SEQ_TYPE_GOTO )
-    {
-        // for motion sequence we need to precalculate the parameters
-        if ( core.seq_fifo.pcoord_updated == 0 )
-        {                                                   // if first run after a stop/flush
-            stepper_get_coord( &core.seq_fifo.pcoord );     // update the end coordinates with the current coordinate
-            core.seq_fifo.pcoord_updated = 1;
-        }
-        internal_sequence_precalculate( seq, fseq );
-        core.seq_fifo.pcoord = seq->params.go_to.coord;     // save the end coordinates of the introduced sequence
-    }
-    else
-    {
-        // for the other sequences
-        fseq->params.spindle = seq->params.spindle;
-        //location for note#0001 from motion_core_internals.h
-    }
-
-    return internal_seq_fifo_insert( NULL );
+    return internal_sequence_fifo_insert(seq);
 }
 
 
@@ -907,6 +1073,7 @@ void motion_sequence_start( void )
         return;
 
     core.status.is_started = true;
+    internal_step_precalculator();
     internal_sequencer_poll( &evt );
 }
 
@@ -916,22 +1083,17 @@ void motion_sequence_stop( void )
 
 }
 
-void motion_sequence_flush( void )
-{
-
-}
-
 
 uint32 motion_sequence_crt_cmdID()
 {
     if ( core.status.is_running )
-        return core.status.crt_seq.cmdID;
+        return core.status.crt_stp.cmdID;
     else
     {
-        struct SMotionFifoElement *seq;
-        if ( internal_seq_fifo_peek( &seq, false ) )
+        struct SStepFifoElement *stp;
+        if ( internal_step_fifo_peek( &stp, false ) )
             return CMD_ID_INVALID;
-        return seq->cmdID;
+        return stp->cmdID;
     }
 }
 
@@ -939,13 +1101,13 @@ uint32 motion_sequence_crt_cmdID()
 uint32 motion_sequence_crt_seqID()
 {
     if ( core.status.is_running )
-        return core.status.crt_seq.seqID;
+        return core.status.crt_stp.seqID;
     else
     {
-        struct SMotionFifoElement *seq;
-        if ( internal_seq_fifo_peek( &seq, false ) )
+        struct SStepFifoElement *stp;
+        if ( internal_step_fifo_peek( &stp, false ) )
             return CMD_ID_INVALID;
-        return seq->seqID;
+        return stp->seqID;
     }
 }
 

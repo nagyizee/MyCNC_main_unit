@@ -48,7 +48,7 @@ mainw::mainw(QWidget *parent) :
 //    ui->gw_xy->setScene(scene_z);
 
     // init display
-    Disp_Redraw();
+    Disp_Redraw(false);
 
     ticktimer = new QTimer( this );
     connect(ticktimer, SIGNAL(timeout()), this, SLOT(TimerTick()));
@@ -81,7 +81,8 @@ void mainw::TimerTick()
 {
     int i;
     int j;
-
+    static int ctdown = 0;
+    
     for (i=0; i<tick_to_sim; i++)
     {
 
@@ -100,7 +101,16 @@ void mainw::TimerTick()
         StepTimerIntrHandler();
     }
 
-    HW_wrapper_update_display();
+    if ( ctdown == 0 )
+    {
+        HW_wrapper_update_display( true );
+        ctdown = 1;
+    }
+    else
+    {
+        HW_wrapper_update_display( false );
+        ctdown--;
+    }
 }
 
 

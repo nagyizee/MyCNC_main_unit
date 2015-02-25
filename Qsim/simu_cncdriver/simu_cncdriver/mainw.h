@@ -82,12 +82,12 @@ public:
     bool HW_wrapper_button_state(int button);
 
 
-    void Disp_Redraw();
+    void Disp_Redraw( bool redrw_ui );
     void dispsim_add_point();
     void dispsim_mem_clean();
 
     void HW_assertion(const char *reason);
-    void HW_wrapper_update_display( void );
+    void HW_wrapper_update_display( bool redrw_ui );
 
 
 

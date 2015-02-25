@@ -37,6 +37,15 @@ struct SDebugStep
 
 struct SDebugStep dbg_step;
 
+struct SAccelDebug
+{
+    int phase;
+    int sense;
+    bool dirty;
+} accel;
+
+
+
 void InitHW(void)
 {
 }
@@ -259,7 +268,16 @@ void HW_ResetClk_X() {  /*dummy*/  }
 void HW_ResetClk_Y() {  /*dummy*/  }
 void HW_ResetClk_Z() {  /*dummy*/  }
 void HW_ResetClk_A() {  /*dummy*/  }
-
+ 
+void StepDBG_Accelerations( int phase, int sense )
+{
+    if ( (phase != accel.phase) || (sense != accel.sense) )
+    {
+        accel.phase = phase;
+        accel.sense = sense;
+        accel.dirty = true;
+    }
+}
 
 void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *c2 )
 {
@@ -278,6 +296,8 @@ void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *
 
 void StepDBG_SegmentFinished()
 {
+    accel.dirty = true;
+    accel.phase = 3;
     if ( dbg_step.log_file )
     {
         fprintf(dbg_step.log_file, "\n");
@@ -345,9 +365,9 @@ bool mainw::HW_wrapper_button_state(int button)
 }
 
 
-void mainw::HW_wrapper_update_display( void )
+void mainw::HW_wrapper_update_display( bool redrw_ui )
 {
-    Disp_Redraw();
+    Disp_Redraw(redrw_ui);
 
 }
 
@@ -359,7 +379,7 @@ void mainw::HW_wrp_setcoord( int coord, bool num, double num_val, int step_val )
     else
         hw_coords.coord[coord] = step_val;
 
-    Disp_Redraw();
+    Disp_Redraw(false);
 }
 
 
@@ -386,7 +406,7 @@ void mainw::dispsim_add_point()
 }
 
 
-void mainw::Disp_Redraw()
+void mainw::Disp_Redraw( bool redrw_ui )
 {
     QImage image( gmem_xy, DISPSIM_MAX_W, DISPSIM_MAX_H, DISPSIM_MAX_W * 3, QImage::Format_RGB888 );
 
@@ -399,27 +419,66 @@ void mainw::Disp_Redraw()
     pointer_xy->setPos( hw_coords.coord[COORD_X] / 40 , 460 - hw_coords.coord[COORD_Y] / 40 );
     pointer_xy->setZValue(1);
 
-    ui->dl_rotor_x->setValue( hw_coords.coord[COORD_X] % 400 );
-    ui->dl_rotor_y->setValue( hw_coords.coord[COORD_Y] % 400 );
-    ui->dl_rotor_z->setValue( hw_coords.coord[COORD_Z] % 400 );
-    ui->dl_rotor_a->setValue( hw_coords.coord[COORD_A] % 400 );
+    if ( redrw_ui )
+    {
+        ui->dl_rotor_x->setValue( hw_coords.coord[COORD_X] % 400 );
+        ui->dl_rotor_y->setValue( hw_coords.coord[COORD_Y] % 400 );
+        ui->dl_rotor_z->setValue( hw_coords.coord[COORD_Z] % 400 );
+        ui->dl_rotor_a->setValue( hw_coords.coord[COORD_A] % 400 );
+    
+        ui->nm_rotor_x->setValue( hw_coords.coord[COORD_X] );
+        ui->nm_rotor_y->setValue( hw_coords.coord[COORD_Y] );
+        ui->nm_rotor_z->setValue( hw_coords.coord[COORD_Z] );
+        ui->nm_rotor_a->setValue( hw_coords.coord[COORD_A] );
+    
+        ui->nm_real_x->setValue( hw_coords.coord[COORD_X] / 400.0 );
+        ui->nm_real_y->setValue( hw_coords.coord[COORD_Y] / 400.0 );
+        ui->nm_real_z->setValue( hw_coords.coord[COORD_Z] / 400.0 );
+        ui->nm_real_a->setValue( hw_coords.coord[COORD_A] / 400.0 );
+    
+        SStepCoordinates soft_coord;
+    
+        motion_get_crt_coord( &soft_coord );
+        ui->nm_stepx->setValue( soft_coord.coord[COORD_X] );
+        ui->nm_stepy->setValue( soft_coord.coord[COORD_Y] );
+        ui->nm_stepz->setValue( soft_coord.coord[COORD_Z] );
+        ui->nm_stepa->setValue( soft_coord.coord[COORD_A] );
 
-    ui->nm_rotor_x->setValue( hw_coords.coord[COORD_X] );
-    ui->nm_rotor_y->setValue( hw_coords.coord[COORD_Y] );
-    ui->nm_rotor_z->setValue( hw_coords.coord[COORD_Z] );
-    ui->nm_rotor_a->setValue( hw_coords.coord[COORD_A] );
-
-    ui->nm_real_x->setValue( hw_coords.coord[COORD_X] / 400.0 );
-    ui->nm_real_y->setValue( hw_coords.coord[COORD_Y] / 400.0 );
-    ui->nm_real_z->setValue( hw_coords.coord[COORD_Z] / 400.0 );
-    ui->nm_real_a->setValue( hw_coords.coord[COORD_A] / 400.0 );
-
-    SStepCoordinates soft_coord;
-
-    motion_get_crt_coord( &soft_coord );
-    ui->nm_stepx->setValue( soft_coord.coord[COORD_X] );
-    ui->nm_stepy->setValue( soft_coord.coord[COORD_Y] );
-    ui->nm_stepz->setValue( soft_coord.coord[COORD_Z] );
-    ui->nm_stepa->setValue( soft_coord.coord[COORD_A] );
+        if ( accel.dirty )
+        {
+            switch (accel.phase)
+            {
+                case 0:
+                    ui->cb_start->setChecked(true);
+                    ui->cb_const->setChecked(false);
+                    ui->cb_end->setChecked(false);
+                    ui->cb_acc->setChecked( accel.sense ? true : false );
+                    ui->cb_dec->setChecked( accel.sense ? false : true );
+                    break;
+                case 1:
+                    ui->cb_start->setChecked(false);
+                    ui->cb_const->setChecked(true);
+                    ui->cb_end->setChecked(false);
+                    ui->cb_acc->setChecked( false );
+                    ui->cb_dec->setChecked( false );
+                    break;
+                case 2:
+                    ui->cb_start->setChecked(false);
+                    ui->cb_const->setChecked(false);
+                    ui->cb_end->setChecked(true);
+                    ui->cb_acc->setChecked( accel.sense ? true : false );
+                    ui->cb_dec->setChecked( accel.sense ? false : true );
+                    break;
+                case 3:
+                    ui->cb_start->setChecked(false);
+                    ui->cb_const->setChecked(false);
+                    ui->cb_end->setChecked(false);
+                    ui->cb_acc->setChecked( false );
+                    ui->cb_dec->setChecked( false );
+                    break;
+            }
+            accel.dirty = false;
+        }
+    }
 
 }
