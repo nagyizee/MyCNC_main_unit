@@ -25,6 +25,7 @@
     #define STEP_P_SEC_NOACC    ( (MM_P_M_NOACC * STEP_MM) / 60 )       // maximum step speed without acceleration
     
     #define ACC_FACTOR_FP32     ((uint32)( (uint64)(9000LL << 32) / (STEP_CLOCK * ( STEP_CLOCK / 2 )) ))    // 9000step/sec diff in 1/2 sec   
+    #define ACC_FACTOR_MMPM     ( 162039 )              // 162039.66   -> find out how to calculate it from FP32
 
     #define STEP_X          ( 1 << COORD_X )
     #define STEP_Y          ( 1 << COORD_Y )

@@ -30,7 +30,7 @@
     struct SMS_Goto
     {
         struct SStepCoordinates coord;      // coordinate to go to
-        TFeedSpeed feed;                    // feed speed in mm/min - speed to be reached at sequence end
+        TFeedSpeed feed;                    // feed speed in mm/min - sequence speed
     };
 
     // motion sequence element
@@ -103,7 +103,7 @@
 
     // start motion sequence - if queue is empty it will wait for new sequence insertion,
     // when sequence is inserted it will run it right away
-    void motion_sequence_start( void );
+    int motion_sequence_start( void );
 
     // stop motion sequence - will produce an immediate halt if motion is in execution
     // step fifo and sequence fifo is flushed

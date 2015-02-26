@@ -30,6 +30,7 @@
 
         uint32  cnc_warn_no_more_steps:1;   // stepping fifo emptied
         uint32  cnc_warn_last_step:1;       // last step command issued from the fifo
+        uint32  cnc_motion_seq_fatal:1;     // fatal error produced in sequence execution (like out of boundaries or impossible speed setup error)
 
         uint32  emerg_button:1;             // emergency button pressed - button state
         uint32  button_pressed_emerg:1;     // emergency button pressed - refresh - instant

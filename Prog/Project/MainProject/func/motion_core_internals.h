@@ -11,6 +11,8 @@
     #define MAX_SEQ_FIFO       32        // 
     #define MAX_STEP_FIFO      20        // 1840 bytes fifo
 
+    #define START_FEED         100       // use 100mm/min as start-up feed - it is used for stopping also
+    #define MINIMUM_FEED        20       // this is the absolute minimum feed speed usable on the machine
 
     struct SMotionCoreActionCommon              // struct. size = 84
     {
@@ -79,8 +81,10 @@
         bool                        pcoord_updated;     // false if this is the first entry since stop or flush, true - if pcood is allready updated
         struct SStepCoordinates     pcoord;             // previous coordinate - used for distance calculation when introducing sequences in fifo
 
-        bool                        next_precalc;               // false if no precalculation is done for the next sequence                                         
-        uint64                      next_L;
+        bool                        next_precalc;       // false if no precalculation is done for the next sequence                                         
+        uint64                      next_L;             // precalculated length of the next sequence
+
+        TFeedSpeed                  prev_speed;         // last speed * cosTheta calculated from the previous sequence  
 
     };
 

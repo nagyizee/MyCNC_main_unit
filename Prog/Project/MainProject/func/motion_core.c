@@ -625,7 +625,9 @@ static uint32 internal_calculate_acc_dist_fp16( uint32 v1, uint32 v2 )
 {
     // D = ( V2^2 - V1^2 ) / 2 * ACC
     // v1, v2 are in fp32 ->  v^2 will produce fp64, divided with ACCfp32 -> fp32, will divide with fp16 to obtain distance in fp16
-    return  ((uint64)v2*v2-(uint64)v1*v1) / ( (uint64)ACC_FACTOR_FP32 << 17 );                  // the 17 is from 2*Acc: (fp16)16 + 1 (shift it one more)
+    uint64 acc;
+    acc = (uint64)ACC_FACTOR_FP32 << 17;
+    return  ((uint64)v2*v2-(uint64)v1*v1) / ( acc );                  // the 17 is from 2*Acc: (fp16)16 + 1 (shift it one more)
 }
 
 
@@ -701,11 +703,48 @@ static inline int internal_calculate_accdec_distances( struct SStepFifoElement *
 }
 
 
+static inline double internal_calculate_cosTheta( uint64 Len1, struct SMotionSequence *crt_seq, struct SMotionSequence *next_seq )
+{
+    double cosT;
+    double L1;
+    double L2;
+    int i;
+    int64 dot_prod = 0;
+
+    // if there is no next sequence - consider CosTheta=0 which means that must stop
+    if ( !next_seq || (next_seq->seqType != SEQ_TYPE_GOTO) )
+        return 0;
+
+    // calculate the dot product for the two vectors:
+    // dx1 * dx2 + dy1 * dy2 + dz1 * dz2 + da1 * da2
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
+    {
+        int64 mul;
+        int d1 = (crt_seq->params.go_to.coord.coord[i] - core.status.motion.pcoord.coord[i]);
+        int d2 = (next_seq->params.go_to.coord.coord[i] - crt_seq->params.go_to.coord.coord[i]);
+        mul = d1 * d2;
+        dot_prod += mul;
+    }
+
+    // magnitude of vectors (lengths)
+    L1 = (double)Len1 / (1LL<<FPlen);
+    L2 = (double)core.status.motion.next_L / (1LL<<FPlen);
+
+    // calculate cosT:
+    cosT = (double)dot_prod / ( L1 * L2 );
+    return cosT;
+}
+
+
 static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSequence *crt_seq, struct SMotionSequence *next_seq, uint32 *feed_start, uint32 *feed_end )
 {
     uint64 ret_val;
     uint64 sum;
+    double CosTheta;
     int i;
+
+    uint32 fstart;
+    uint32 fend;
 
     // check and calc for the current sequence
     if ( core.status.motion.next_precalc == false ) // no precalculation from the previous step (peeked next sequence - which is the current one now)
@@ -743,52 +782,89 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
         core.status.motion.next_precalc = false;
     }
 
-
-    // dummy solution - needs to be changed
-    if ( crt_seq->params.go_to.feed > 150 )
-    {
-        *feed_start = 150;
-        *feed_end = 150;
-    }
-    else 
-    {
-        *feed_start = crt_seq->params.go_to.feed;
-        *feed_end = crt_seq->params.go_to.feed;
-    }
-
-
     // speed difference bw. sequences:  
     //      - plain feed speed difference 
     //      - angle bw. sequences
 
-    // calculate angles
-    if ( 0 )//next_seq )
-    {
-        double cosT;
-        double L1;
-        double L2;
-        int64 dot_prod = 0;
-
-        // calculate the dot product for the two vectors:
-        // dx1 * dx2 + dy1 * dy2 + dz1 * dz2 + da1 * da2
-        for ( i=0; i<CNC_MAX_COORDS; i++ )
-        {
-            int64 mul;
-            int d1 = (crt_seq->params.go_to.coord.coord[i] - core.status.motion.pcoord.coord[i]);
-            int d2 = (next_seq->params.go_to.coord.coord[i] - crt_seq->params.go_to.coord.coord[i]);
-            mul = d1 * d2;
-            dot_prod += mul;
-        }
-
-        // magnitude of vectors (lengths)
-        L1 = (double)ret_val / (1LL<<FPlen);
-        L2 = (double)core.status.motion.next_L / (1LL<<FPlen);
-
-        // calculate cosT:
-        cosT = (double)dot_prod / ( L1 * L2 );
-
+    // figure out the start speed
+    if ( core.status.motion.prev_speed == 0 )       // starting from speed 0
+    {   
+        if ( crt_seq->params.go_to.feed > START_FEED )
+            fstart = START_FEED;
+        else
+            fstart = crt_seq->params.go_to.feed;
+    }
+    else
+    {                                               // else use the saved last speed (relative to this vector - it has cosTheta also)
+        fstart = core.status.motion.prev_speed;
     }
 
+    // figure out the end speed
+    CosTheta = internal_calculate_cosTheta( ret_val, crt_seq, next_seq );
+    if ( CosTheta <= 0 )
+    {
+        // full stop should be carried out no matter what speed has the next sequence
+        core.status.motion.prev_speed = 0;      // indicating that this sequence stopped, start speed for the next sequence is from 0
+        fend = MINIMUM_FEED;                // 
+    }
+    else
+    {
+        if ( CosTheta > 0.96 )      // if angle between vectors < 15* - do not consider it - regard it as straight line
+            CosTheta = 1;
+        fend = (uint32)(next_seq->params.go_to.feed * CosTheta);        // relative speed for the next sequence
+        if ( fend < MINIMUM_FEED )
+            fend = MINIMUM_FEED;
+    }
+    
+    // check if end speed is doable with the current start speed and acceleration
+    {
+        uint32 dist;
+        uint32 fe;
+        uint32 fs;
+
+        fe = internal_calculate_stepspeed( fend );
+        fs = internal_calculate_stepspeed( fstart );
+
+        // formula: 
+        // V^2 = V0^2 + 2*a*L
+        // V = Sqrt( V0^2 + 2*a*L )
+        if ( fend > fstart )
+        {
+            // distance = ( V^2 - V0^2 ) / 2*a      
+            // dist in steps = distance * 400
+            dist = internal_calculate_acc_dist_fp16( fs, fe ) + 1; 
+            dist = dist >> 16;                      // convert back from fp16
+            if ( dist >= (ret_val >> FPlen) )       // this cut of precision adds to the safety margin
+            {
+                // new end speed = Sqrt( V0^2 + 2 * acc * L(mm) ) = Sqrt( V0*V0 + 2*acc*L(step)/400 )
+                double sq;
+                sq = sqrt( fstart*fstart + (uint64)ACC_FACTOR_MMPM*(ret_val>>FPlen)/200 );
+                fend = (uint32)sq - 1;
+            }
+        }
+        else if ( fend < fstart )
+        {
+            dist = internal_calculate_acc_dist_fp16( fe, fs ) + 1; 
+            dist = dist >> 16;                      // convert back from fp16
+            if ( dist >= (ret_val >> FPlen) )       // this cut of precision adds to the safety margin
+            {
+                double sq;
+                sq = sqrt( fstart*fstart - (uint64)ACC_FACTOR_MMPM*(ret_val>>FPlen)/200 );
+                fend = (uint32)sq + 1;
+            }
+        }
+    }
+
+    // save the end speed for the next iteration with cosTheta
+    if ( CosTheta )
+    {
+        core.status.motion.prev_speed = fend * CosTheta;        // relative speed for the next sequence
+        if ( core.status.motion.prev_speed < MINIMUM_FEED )
+            core.status.motion.prev_speed = MINIMUM_FEED;
+    }
+
+    *feed_start = fstart;
+    *feed_end = fend;
     return ret_val;
 }
 
@@ -898,7 +974,6 @@ static int internal_step_precalculator( void )
 
     internal_sequence_fifo_peek( &crt_seq, false );     // peek the current sequence pointer from input fifo
     internal_sequence_fifo_peek( &next_seq, true );     // peek the next one for distance / speed / and angle info
-    internal_sequence_fifo_get( NULL );                 // dummy get to advance the read pointer            
 
     pstep->cmdID = crt_seq->cmdID;
     pstep->seqID = crt_seq->seqID;
@@ -913,7 +988,9 @@ static int internal_step_precalculator( void )
             core.status.motion.pcoord_updated = 1;
         }
 
-        internal_sequence_precalculate( crt_seq, next_seq, pstep );
+        if ( internal_sequence_precalculate( crt_seq, next_seq, pstep ) )
+            return -1;
+
         core.status.motion.pcoord = crt_seq->params.go_to.coord;     // save the end coordinates of the introduced sequence
     }
     else
@@ -923,6 +1000,7 @@ static int internal_step_precalculator( void )
         //location for note#0001 from motion_core_internals.h
     }
 
+    internal_sequence_fifo_get( NULL );                 // dummy get to advance the read pointer            
     return internal_step_fifo_insert( NULL );
 }
 
@@ -1019,7 +1097,10 @@ void motion_poll( struct SEventStruct *evt )
 {
     if ( core.status.is_started )
     {
-        internal_step_precalculator();
+        if ( internal_step_precalculator() )
+        {
+            evt->cnc_motion_seq_fatal = 1;
+        }
         internal_sequencer_poll( evt );
     }
 
@@ -1101,15 +1182,20 @@ int motion_sequence_insert( struct SMotionSequence *seq )
 }
 
 
-void motion_sequence_start( void )
+int motion_sequence_start( void )
 {
     struct SEventStruct evt = { 0, };
     if ( core.status.is_started )
         return;
 
     core.status.is_started = true;
-    internal_step_precalculator();
+    if ( internal_step_precalculator() )
+    {
+        core.status.is_started = false;
+        return -1;
+    }
     internal_sequencer_poll( &evt );
+    return 0;
 }
 
 
