@@ -805,7 +805,8 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
     {
         // full stop should be carried out no matter what speed has the next sequence
         core.status.motion.prev_speed = 0;      // indicating that this sequence stopped, start speed for the next sequence is from 0
-        fend = MINIMUM_FEED;                // 
+        CosTheta = 0;
+        fend = MINIMUM_FEED;                    //
     }
     else
     {
