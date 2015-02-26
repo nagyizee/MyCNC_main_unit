@@ -61,6 +61,10 @@ private slots:
 
     void on_vs_simu_speed_valueChanged(int value);
 
+    void on_pb_start_clicked();
+
+    void on_pb_feedSeq_clicked();
+
 private:
     Ui::mainw *ui;
     QTimer *ticktimer;
@@ -97,6 +101,8 @@ private:
     void HW_wrapper_setup( int interval );            // set up the this pointer in the hardware wrapper (simulation module)
     void HW_wrp_setcoord( int coord, bool num, double num_val, int step_val );
 
+    void HW_wrp_motion_start();
+    void HW_wrp_feed_seq();
 
 };
 

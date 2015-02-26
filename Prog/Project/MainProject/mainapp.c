@@ -101,41 +101,11 @@ static inline void System_Poll( void )
 }
 
 
-struct SStepCoordinates CoordList[] = { { 0, 18398, 32000, 0 },
-                                        { 20000, 16000, 18000, 0 },
-                                        { 27169, 7777, 32000, 0 },
-};
-
-TFeedSpeed speeds[]     = { 1200,   1000,  1200 };
-
-static int lst = 0;
-
 // Main application routine
 static inline void ProcessApplication( struct SEventStruct *evmask )
 {
 
-    if ( evmask->button_pressed_resume )
-    {
-        struct SMotionSequence m;
-        int str_size = (sizeof(CoordList) / sizeof(struct SStepCoordinates));
-        m.cmdID = lst & 0xff;
-        m.seqID = 0;
-        m.seqType = SEQ_TYPE_GOTO;
-        m.params.go_to.feed = speeds[lst];
-        m.params.go_to.coord = CoordList[lst];
-        motion_sequence_insert( &m );
-
-        lst++;
-        if ( lst >= str_size )
-             lst = 0;
-
-    }
     
-    if ( evmask->button_pressed_toolchange )
-    {
-        motion_sequence_start();
-    }
-
     motion_poll( evmask );
 
 }
@@ -150,10 +120,10 @@ void main_entry( uint32 *stack_top )
 
     // init
     struct SStepCoordinates origin;
-    origin.coord[ COORD_X ] = 130*400;
-    origin.coord[ COORD_Y ] = 46*400;
-    origin.coord[ COORD_Z ] = 80*400;
-    origin.coord[ COORD_A ] = 0*400;
+    origin.coord[ COORD_X ] = 0; //130*400;
+    origin.coord[ COORD_Y ] = 0; //46*400;
+    origin.coord[ COORD_Z ] = 0; //80*400;
+    origin.coord[ COORD_A ] = 0; //0*400;
     motion_set_crt_coord( &origin );
 
 }

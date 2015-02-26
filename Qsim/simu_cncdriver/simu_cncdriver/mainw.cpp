@@ -221,3 +221,13 @@ void mainw::on_vs_simu_speed_valueChanged(int value)
     if ( tick_to_sim == 0)
         tick_to_sim = 1;
 }
+
+void mainw::on_pb_start_clicked()
+{
+    HW_wrp_motion_start();
+}
+
+void mainw::on_pb_feedSeq_clicked()
+{
+    HW_wrp_feed_seq();
+}

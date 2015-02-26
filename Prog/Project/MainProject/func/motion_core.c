@@ -755,6 +755,41 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
         *feed_start = crt_seq->params.go_to.feed;
         *feed_end = crt_seq->params.go_to.feed;
     }
+
+
+    // speed difference bw. sequences:  
+    //      - plain feed speed difference 
+    //      - angle bw. sequences
+
+    // calculate angles
+    if ( 0 )//next_seq )
+    {
+        double cosT;
+        double L1;
+        double L2;
+        int64 dot_prod = 0;
+
+        // calculate the dot product for the two vectors:
+        // dx1 * dx2 + dy1 * dy2 + dz1 * dz2 + da1 * da2
+        for ( i=0; i<CNC_MAX_COORDS; i++ )
+        {
+            int64 mul;
+            int d1 = (crt_seq->params.go_to.coord.coord[i] - core.status.motion.pcoord.coord[i]);
+            int d2 = (next_seq->params.go_to.coord.coord[i] - crt_seq->params.go_to.coord.coord[i]);
+            mul = d1 * d2;
+            dot_prod += mul;
+        }
+
+        // magnitude of vectors (lengths)
+        L1 = (double)ret_val / (1LL<<FPlen);
+        L2 = (double)core.status.motion.next_L / (1LL<<FPlen);
+
+        // calculate cosT:
+        cosT = (double)dot_prod / ( L1 * L2 );
+
+    }
+
+    return ret_val;
 }
 
 

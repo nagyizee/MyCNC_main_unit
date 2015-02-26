@@ -12,6 +12,22 @@
 mainw *pClass;
 int tiv;
 
+/// test stuff ///////////
+
+#define C(a)  (a * 400)
+
+struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
+                                        { C(20), C(10), C(10), 0 },
+                                        { C(20), C(5), C(10), 0 }
+
+
+};
+TFeedSpeed speeds[]     = { 1200,   1000,  1200 };
+
+
+
+
+
 /// display stuff /////////////
 #define MAX_LINES       2
 #define MAX_COLOUMNS    16
@@ -327,10 +343,10 @@ void mainw::HW_wrapper_setup( int interval )
     pClass = this;
     tiv    = interval;
 
-    hw_coords.coord[COORD_X] = 130*400;
-    hw_coords.coord[COORD_Y] = 46*400;
-    hw_coords.coord[COORD_Z] = 80*400;
-    hw_coords.coord[COORD_A] = 0*400;
+    hw_coords.coord[COORD_X] = 0; //130*400;
+    hw_coords.coord[COORD_Y] = 0; //46*400;
+    hw_coords.coord[COORD_Z] = 0; //80*400;
+    hw_coords.coord[COORD_A] = 0; //0*400;
 
 }
 
@@ -382,6 +398,33 @@ void mainw::HW_wrp_setcoord( int coord, bool num, double num_val, int step_val )
     Disp_Redraw(false);
 }
 
+
+
+
+//////////////// test routines
+static int lst = 0;
+
+void mainw::HW_wrp_motion_start()
+{
+    motion_sequence_start();
+}
+
+void mainw::HW_wrp_feed_seq()
+{
+    struct SMotionSequence m;
+    int str_size = (sizeof(CoordList) / sizeof(struct SStepCoordinates));
+    m.cmdID = lst & 0xff;
+    m.seqID = 0;
+    m.seqType = SEQ_TYPE_GOTO;
+    m.params.go_to.feed = speeds[lst];
+    m.params.go_to.coord = CoordList[lst];
+    motion_sequence_insert( &m );
+
+    lst++;
+    if ( lst >= str_size )
+         lst = 0;
+
+}
 
 /////////////////////////////////////////////////////
 // Display simulation
