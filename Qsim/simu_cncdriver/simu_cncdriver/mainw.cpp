@@ -231,3 +231,16 @@ void mainw::on_pb_feedSeq_clicked()
 {
     HW_wrp_feed_seq();
 }
+
+
+void mainw::on_pb_stop_clicked()
+{
+    HW_wrp_stop();
+}
+
+void mainw::on_nm_scale_editingFinished()
+{
+    HW_wrp_set_speedFactor( ui->nm_scale->value() );
+}
+
+

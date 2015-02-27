@@ -507,6 +507,17 @@ void mainw::HW_wrp_feed_seq()
 
 }
 
+
+void mainw::HW_wrp_stop()
+{
+    motion_sequence_stop();
+}
+
+void mainw::HW_wrp_set_speedFactor( int factor )
+{
+    motion_feed_scale( factor );
+}
+
 /////////////////////////////////////////////////////
 // Display simulation
 /////////////////////////////////////////////////////

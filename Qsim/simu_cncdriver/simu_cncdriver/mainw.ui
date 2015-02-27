@@ -801,7 +801,7 @@
     <property name="geometry">
      <rect>
       <x>320</x>
-      <y>520</y>
+      <y>480</y>
       <width>75</width>
       <height>23</height>
      </rect>
@@ -814,7 +814,7 @@
     <property name="geometry">
      <rect>
       <x>320</x>
-      <y>550</y>
+      <y>510</y>
       <width>75</width>
       <height>23</height>
      </rect>
@@ -885,6 +885,51 @@
     </property>
     <property name="maximum">
      <number>99999</number>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pb_stop">
+    <property name="geometry">
+     <rect>
+      <x>320</x>
+      <y>550</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Stop</string>
+    </property>
+   </widget>
+   <widget class="QSpinBox" name="nm_scale">
+    <property name="geometry">
+     <rect>
+      <x>340</x>
+      <y>580</y>
+      <width>51</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="buttonSymbols">
+     <enum>QAbstractSpinBox::NoButtons</enum>
+    </property>
+    <property name="minimum">
+     <number>-200</number>
+    </property>
+    <property name="maximum">
+     <number>200</number>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_9">
+    <property name="geometry">
+     <rect>
+      <x>310</x>
+      <y>585</y>
+      <width>46</width>
+      <height>10</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Scale:</string>
     </property>
    </widget>
   </widget>

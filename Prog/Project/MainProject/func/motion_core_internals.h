@@ -95,6 +95,8 @@
 
         TFeedSpeed                  prev_speed;         // last speed * cosTheta calculated from the previous sequence  
 
+        int32                       scale_set;          // speed scale factor set by API
+        int32                       scale_crt;          // current speed scale factor
     };
 
 
@@ -169,6 +171,8 @@
 
         uint32  ckmask;                         // bitmask with channels where clock signal is set
         uint32  ckoff[CNC_MAX_COORDS];          // clock off timeout
+
+        int32   scale_factor;                   // speed scale factor: +/- 200 %.   0 - means no scale, +200% - 2x faster, -200% - 2x slower 
 
         struct SStepCoordinates crt_poz;        // current position
                                                 

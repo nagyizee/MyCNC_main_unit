@@ -150,10 +150,26 @@ extern void event_ISR_set10ms( void );
 static uint32 ISR_counter = 0;
 
 
-static inline void local_isr_step_channel( int i )
+static inline uint32 local_isr_step_speed_factor( int i )
+{
+    if ( isr.scale_factor == 0 )
+        return isr.crt_action.p.Stp_crt[i];
+    else
+    {
+        uint32 maxsp = CNC_MAX_FEED_STEP;
+        uint32 sp = isr.crt_action.p.Stp_crt[i];
+
+        if ( isr.scale_factor > 0 )
+            sp = sp + (uint32)(((uint64)sp * isr.scale_factor) / 200);
+        else
+            sp = sp - (uint32)(((uint64)(sp >> 1) * isr.scale_factor) / 200);
+    }
+}
+
+static inline void local_isr_step_channel( int i, uint32 speed )
 {
     // increment distance counter
-    isr.op.D[i] += isr.crt_action.p.Stp_crt[i];
+    isr.op.D[i] += speed;
 
     // step when integer part changes
     if ( isr.op.Dprev[i] != (uint32)(isr.op.D[i] >> 32) )
@@ -315,7 +331,11 @@ void StepTimerIntrHandler (void)
                 local_isr_step_turn_channel_off(i);
 
             if ( isr.crt_action.channel_active & (1 << i) ) // channel is in move
-                local_isr_step_channel(i);
+            {
+                uint32 speed;
+                speed = local_isr_step_speed_factor(i);
+                local_isr_step_channel(i, speed );
+            }
         }
 
         local_isr_recalculate_speeds();
@@ -430,7 +450,21 @@ void    stepper_insert_step( uint32 coords, uint32 dirmask )
     __enable_interrupt();
 }
 
+void stepper_stop()
+{
+    __disable_interrupt();
+    isr.crt_action.channel_active = 0;
+    isr.next_action.channel_active = 0;
+    __enable_interrupt();
+}
 
+
+void stepper_scale_factor( uint32 factor )
+{
+    __disable_interrupt();
+    isr.scale_factor = factor;
+    __enable_interrupt();
+}
 
 
 /* *************************************************
@@ -1094,10 +1128,10 @@ static int internal_step_precalculator( void )
     if ( crt_seq->seqType == SEQ_TYPE_GOTO )
     {
         // for motion sequence we need to precalculate the parameters
-        if ( core.status.motion.pcoord_updated == 0 )
+        if ( core.status.motion.pcoord_updated == false )
         {                                                        // if first run after a stop/flush
             stepper_get_coord( &core.status.motion.pcoord );     // update the end coordinates with the current coordinate
-            core.status.motion.pcoord_updated = 1;
+            core.status.motion.pcoord_updated = true;
         }
 
         if ( internal_sequence_precalculate( crt_seq, next_seq, pstep ) )
@@ -1183,9 +1217,24 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
                             internal_pwr_set_axis_power(i, mpwr_low, 2 );       // power down after 20ms
                         }
                     }
+
+                    // update scale factor to immediate value
+                    core.status.motion.scale_crt = core.status.motion.scale_set;
+                    stepper_scale_factor( core.status.motion.scale_crt );
                 }
                 else                                                // still running
                 {
+                    // update the speed scale factor
+                    if ( evt->timer_tick_10ms && 
+                         (core.status.motion.scale_crt != core.status.motion.scale_set) )
+                    {
+                        if (core.status.motion.scale_crt < core.status.motion.scale_set)
+                            core.status.motion.scale_crt++; 
+                        else
+                            core.status.motion.scale_crt--;
+                        stepper_scale_factor( core.status.motion.scale_crt );
+                    }
+
                     // check for power level adjustment
                     register uint32 isr_status;
                     isr_status = isr.state;     // this sould be atomic
@@ -1388,39 +1437,79 @@ int motion_sequence_start( void )
 
 void motion_sequence_stop( void )
 {
+    int i;
+    if ( core.status.is_started == false )
+        return;
 
+    // flush all the fifos and the IRQ
+    stepper_stop();
+    internal_sequence_fifo_flush();
+    internal_step_fifo_flush();
+
+    // set up low power for all axis after 100ms
+    for (i=0; i<CNC_MAX_COORD; i++)
+    {
+        if ( core.status.pwr[i].set_pwr == mpwr_auto )
+        {
+            internal_pwr_set_axis_power(i, mpwr_low, 10);
+        }
+    }
+
+    // reset internal status
+    core.status.motion.pcoord_updated = false;
+    core.status.motion.next_precalc = false;
+    core.status.motion.prev_speed = 0;
+
+    core.status.motion.scale_crt = core.status.motion.scale_set;
+    stepper_scale_factor( core.status.motion.scale_set );
+
+    // reset running flags
+    core.status.is_running = false;
+    core.status.is_started = false;
 }
 
 
-uint32 motion_sequence_crt_cmdID()
+uint32 motion_sequence_crt_cmdID( void )
 {
     if ( core.status.is_running )
         return core.status.crt_stp.cmdID;
-    else
+    else if ( core.status.is_started )
     {
         struct SStepFifoElement *stp;
         if ( internal_step_fifo_peek( &stp, false ) )
             return CMD_ID_INVALID;
         return stp->cmdID;
     }
+    else
+        return core.status.crt_stp.cmdID;
 }
 
 
-uint32 motion_sequence_crt_seqID()
+uint32 motion_sequence_crt_seqID( void )
 {
     if ( core.status.is_running )
         return core.status.crt_stp.seqID;
-    else
+    else if ( core.status.is_started )
     {
         struct SStepFifoElement *stp;
         if ( internal_step_fifo_peek( &stp, false ) )
             return CMD_ID_INVALID;
         return stp->seqID;
     }
+    else
+        return core.status.crt_stp.seqID;
 }
 
 
-
+void motion_feed_scale( int factor )
+{
+    core.status.motion.scale_crt = factor;
+    if ( core.status.is_running == false )
+    {
+        core.status.motion.scale_set = factor;
+        stepper_scale_factor( factor );
+    }
+}
 
 
 

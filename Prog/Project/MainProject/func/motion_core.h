@@ -111,10 +111,10 @@
     void motion_sequence_stop( void );
 
     // get the current command ID which is in execution, or the last command ID which was interrupted
-    uint32 motion_sequence_crt_cmdID();
+    uint32 motion_sequence_crt_cmdID( void );
 
     // get the current sequence ID which is in execution, or the last sequence ID which was interrupted
-    uint32 motion_sequence_crt_seqID();
+    uint32 motion_sequence_crt_seqID( void );
 
 
     // Scale the feed speed with +/- factor. Value is 0 - 500.

@@ -65,6 +65,10 @@ private slots:
 
     void on_pb_feedSeq_clicked();
 
+    void on_nm_scale_editingFinished();
+
+    void on_pb_stop_clicked();
+
 private:
     Ui::mainw *ui;
     QTimer *ticktimer;
@@ -103,7 +107,7 @@ private:
 
     void HW_wrp_motion_start();
     void HW_wrp_feed_seq();
-
-};
+    void HW_wrp_stop();
+    void HW_wrp_set_speedFactor( int factor );
 
 #endif // MAINW_H
