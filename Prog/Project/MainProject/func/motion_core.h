@@ -64,6 +64,7 @@
     // gets the motor driver pwr state - if returs true - power is set up
     bool motion_pwr_is_set( uint32 axis );
 
+
     // sets up the stepper coordinate counters
     // - do not use this when executing movement
     void motion_set_crt_coord( struct SStepCoordinates *coord );

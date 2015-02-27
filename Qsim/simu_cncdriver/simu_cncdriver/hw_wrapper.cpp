@@ -16,7 +16,7 @@ int tiv;
 
 #define C(a)  (a * 400)
 
-/*
+
 struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(10), C(0), 0 },
                                         { C(15), C(20), C(0), 0 },
@@ -24,7 +24,7 @@ struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(20), C(0), 0 }
 };
 TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200 };
-*/
+
 
 
 /*
@@ -74,7 +74,7 @@ struct SStepCoordinates CoordList[] = { { C(20), C(20), C(0), 0 },
 TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200 };
 */
 
-
+/*
 // line - different speeds
 struct SStepCoordinates CoordList[] = { { 1765, C(0), C(0), 0 },
                                         { C(30), C(0), C(0), 0 },   // same speed
@@ -82,7 +82,7 @@ struct SStepCoordinates CoordList[] = { { 1765, C(0), C(0), 0 },
                                         { C(80), C(0), C(0), 0 },   // faster speed
 };
 TFeedSpeed speeds[]     = { 1200, 1200, 300, 1400 };
-
+*/
 
 
 
@@ -123,9 +123,10 @@ struct SAccelDebug
     int phase;
     int sense;
     bool dirty;
+    int pwr[CNC_MAX_COORDS];
 } accel;
 
-
+int seq_ctr = 0;
 
 void InitHW(void)
 {
@@ -312,7 +313,6 @@ void StepDBG_AddPoint()
 
     dbg_step.step_count++;
     fprintf( dbg_step.log_file, "    %06i,  %2.4lf, %s\n", dbg_step.step_count, dist, (dist > 1.0) ?  (dist > 2.0) ? "<--- 2" : "<--- 1" :" " );
-
 }
 
 
@@ -349,7 +349,22 @@ void HW_ResetClk_X() {  /*dummy*/  }
 void HW_ResetClk_Y() {  /*dummy*/  }
 void HW_ResetClk_Z() {  /*dummy*/  }
 void HW_ResetClk_A() {  /*dummy*/  }
- 
+
+
+void HW_SetPower( int axis, int pwr_level )
+{
+    if ( accel.pwr[axis] == pwr_level )
+        return;
+    accel.pwr[axis] = pwr_level;
+    accel.dirty = true;
+}
+
+bool HW_IsPowerSet( int axis )
+{
+    return true;
+}
+
+
 void StepDBG_Accelerations( int phase, int sense )
 {
     if ( (phase != accel.phase) || (sense != accel.sense) )
@@ -360,7 +375,7 @@ void StepDBG_Accelerations( int phase, int sense )
     }
 }
 
-void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *c2 )
+void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *c2, int secuenceID )
 {
     char filename[128];
     sprintf( filename, "segment_line__%d-%d-%d__%d-%d-%d.log", c1->coord[0], c1->coord[1], c1->coord[2], c2->coord[0], c2->coord[1], c2->coord[2]);
@@ -373,6 +388,7 @@ void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *
         dbg_step.c1 = *c1;
         dbg_step.c2 = *c2;
     }
+    seq_ctr = secuenceID;
 }
 
 void StepDBG_SegmentFinished()
@@ -479,7 +495,7 @@ void mainw::HW_wrp_feed_seq()
     struct SMotionSequence m;
     int str_size = (sizeof(CoordList) / sizeof(struct SStepCoordinates));
     m.cmdID = lst & 0xff;
-    m.seqID = 0;
+    m.seqID = lst & 0xff;
     m.seqType = SEQ_TYPE_GOTO;
     m.params.go_to.feed = speeds[lst];
     m.params.go_to.coord = CoordList[lst];
@@ -552,6 +568,8 @@ void mainw::Disp_Redraw( bool redrw_ui )
         ui->nm_stepz->setValue( soft_coord.coord[COORD_Z] );
         ui->nm_stepa->setValue( soft_coord.coord[COORD_A] );
 
+        ui->nm_seqctr->setValue( seq_ctr );
+
         if ( accel.dirty )
         {
             switch (accel.phase)
@@ -585,6 +603,12 @@ void mainw::Disp_Redraw( bool redrw_ui )
                     ui->cb_dec->setChecked( false );
                     break;
             }
+
+            ui->nm_rotor_pwr_x->setValue( accel.pwr[0] );
+            ui->nm_rotor_pwr_y->setValue( accel.pwr[1] );
+            ui->nm_rotor_pwr_z->setValue( accel.pwr[2] );
+            ui->nm_rotor_pwr_a->setValue( accel.pwr[3] );
+
             accel.dirty = false;
         }
     }

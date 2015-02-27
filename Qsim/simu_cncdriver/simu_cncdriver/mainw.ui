@@ -429,6 +429,35 @@
       <string>Dec</string>
      </property>
     </widget>
+    <widget class="QSpinBox" name="nm_seqctr">
+     <property name="geometry">
+      <rect>
+       <x>225</x>
+       <y>82</y>
+       <width>51</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="maximum">
+      <number>99999</number>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_8">
+     <property name="geometry">
+      <rect>
+       <x>200</x>
+       <y>80</y>
+       <width>21</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>seq:</string>
+     </property>
+    </widget>
    </widget>
    <widget class="QPlainTextEdit" name="tx_commands">
     <property name="geometry">
@@ -792,6 +821,70 @@
     </property>
     <property name="text">
      <string>FeedSeq</string>
+    </property>
+   </widget>
+   <widget class="QSpinBox" name="nm_rotor_pwr_x">
+    <property name="geometry">
+     <rect>
+      <x>1440</x>
+      <y>90</y>
+      <width>21</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <property name="buttonSymbols">
+     <enum>QAbstractSpinBox::NoButtons</enum>
+    </property>
+    <property name="maximum">
+     <number>99999</number>
+    </property>
+   </widget>
+   <widget class="QSpinBox" name="nm_rotor_pwr_y">
+    <property name="geometry">
+     <rect>
+      <x>1440</x>
+      <y>200</y>
+      <width>21</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <property name="buttonSymbols">
+     <enum>QAbstractSpinBox::NoButtons</enum>
+    </property>
+    <property name="maximum">
+     <number>99999</number>
+    </property>
+   </widget>
+   <widget class="QSpinBox" name="nm_rotor_pwr_z">
+    <property name="geometry">
+     <rect>
+      <x>1440</x>
+      <y>310</y>
+      <width>21</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <property name="buttonSymbols">
+     <enum>QAbstractSpinBox::NoButtons</enum>
+    </property>
+    <property name="maximum">
+     <number>99999</number>
+    </property>
+   </widget>
+   <widget class="QSpinBox" name="nm_rotor_pwr_a">
+    <property name="geometry">
+     <rect>
+      <x>1440</x>
+      <y>420</y>
+      <width>21</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <property name="buttonSymbols">
+     <enum>QAbstractSpinBox::NoButtons</enum>
+    </property>
+    <property name="maximum">
+     <number>99999</number>
     </property>
    </widget>
   </widget>

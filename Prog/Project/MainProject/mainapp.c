@@ -126,6 +126,12 @@ void main_entry( uint32 *stack_top )
     origin.coord[ COORD_A ] = 0; //0*400;
     motion_set_crt_coord( &origin );
 
+
+    motion_pwr_ctrl( COORD_X, mpwr_auto );
+    motion_pwr_ctrl( COORD_Y, mpwr_auto );
+    motion_pwr_ctrl( COORD_Z, mpwr_auto );
+    motion_pwr_ctrl( COORD_A, mpwr_off );
+
 }
 
 

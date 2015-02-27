@@ -28,8 +28,7 @@
         uint32  comm_new_request:1;         // new message from communication port
         uint32  comm_error_in_full:1;       // input queue full error
 
-        uint32  cnc_warn_no_more_steps:1;   // stepping fifo emptied
-        uint32  cnc_warn_last_step:1;       // last step command issued from the fifo
+        uint32  cnc_motion_warn_starving:1; // if motion core is running sequences, input fifo has sequences but output fifo is emptied and IRQ staves
         uint32  cnc_motion_seq_fatal:1;     // fatal error produced in sequence execution (like out of boundaries or impossible speed setup error)
 
         uint32  emerg_button:1;             // emergency button pressed - button state

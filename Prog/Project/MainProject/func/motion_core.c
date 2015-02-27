@@ -283,7 +283,7 @@ static void local_isr_peek_next_action( void )
     isr.crt_action = isr.next_action;       // copy the action struct
     isr.next_action.channel_active = 0;     // mark the user level action struct as free
 
-    StepDBG_LineSegment( &isr.crt_poz, &isr.crt_action.p.dest_poz );
+    StepDBG_LineSegment( &isr.crt_poz, &isr.crt_action.p.dest_poz, isr.crt_action.seq_id );
 
     memset( &isr.op, 0, sizeof(isr.op) );
 
@@ -597,6 +597,59 @@ static inline int internal_step_fifo_fullness( void )
 }
 
 
+/*--------------------------
+ *  Power control routines
+ *-------------------------*/
+
+static void internal_pwr_set_axis_power( uint32 axis, uint32 pwr_level, uint32 delay )
+{
+    if ( pwr_level == core.status.pwr[axis].crt_power )
+        return;
+
+    core.status.pwr_check = true;
+    core.status.pwr[axis].delay = delay;
+    core.status.pwr[axis].is_dirty = true;
+    core.status.pwr[axis].crt_power = pwr_level;
+    if ( delay == 0 )
+        HW_SetPower( axis, pwr_level );
+}
+
+
+static inline void internal_pwr_check_and_update_status( bool tick )
+{
+    if ( core.status.pwr_check )                    // check power setup status
+    {
+        int i;
+        core.status.pwr_check = false;
+        for ( i=0; i<CNC_MAX_COORDS; i++ )
+        {
+            if ( core.status.pwr[i].is_dirty )              // if setup in pending - check for completion
+            {
+                if ( core.status.pwr[i].delay )                     // if delayed
+                {
+                    core.status.pwr_check = true;
+                    if ( tick )                                                 // count down on 10ms interval
+                    {
+                        core.status.pwr[i].delay--;
+                        if ( core.status.pwr[i].delay == 0 )
+                        {
+                            HW_SetPower(i, core.status.pwr[i].crt_power);       // if reached 0 -> set the power
+                        }
+                    }
+                }
+                else                                            // if no delay - check the completion
+                {
+                    if ( HW_IsPowerSet(i) )
+                        core.status.pwr[i].is_dirty = false;    // if is set - clear the dirty flag
+                    else
+                        core.status.pwr_check = true;           // if still not set - mark for chekup for the next time
+                }
+            }
+        }
+    }
+}
+
+
 
 /*--------------------------
  *  Sequencer routines
@@ -815,6 +868,11 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
         fend = (uint32)(next_seq->params.go_to.feed * CosTheta);        // relative speed for the next sequence
         if ( fend < MINIMUM_FEED )
             fend = MINIMUM_FEED;
+        if ( fend > crt_seq->params.go_to.feed )        // never accelerate the current sequence end because of the next sequence
+        {
+            fend = crt_seq->params.go_to.feed;
+        }
+
     }
     
     // check if end speed is doable with the current start speed and acceleration
@@ -869,6 +927,57 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
     return ret_val;
 }
 
+
+#define STEPPWR_HIGH    0x147AE147      // for 600mm/min - speeds abowe this need full power
+#define STEPPWR_MED     0x0A3D70A3      // for 300mm/min - speeds abowe this need high power
+#define STEPPWR_LOW     0x01B4F81D      // for  50mm/min - speeds abowe this need medium power
+
+static void internal_calculate_power_levels( struct SStepFifoElement *pstep )
+{
+    int i;
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
+    {
+        uint32 pwr_ct;
+        uint32 pwr_bgn;
+        uint32 pwr_end;
+
+        // power for constant ramp
+        if ( pstep->params.go_to.p.Stp_ct[i] > STEPPWR_HIGH )
+            pwr_ct = mpwr_full;
+        else if ( pstep->params.go_to.p.Stp_ct[i] >= STEPPWR_MED )
+            pwr_ct = mpwr_high;
+        else if ( pstep->params.go_to.p.Stp_ct[i] >= STEPPWR_LOW )
+            pwr_ct = mpwr_med;
+        else
+            pwr_ct = mpwr_low;
+
+        // power for start acceleration
+        if ( pstep->params.go_to.p.Stp_ct[i] == pstep->params.go_to.p.Stp_crt[i] )
+        {
+            pwr_bgn = pwr_ct;
+        }
+        else
+        {
+            pwr_bgn = pwr_ct + 2;
+            if ( pwr_bgn > mpwr_full )
+                pwr_bgn = mpwr_full;
+        }
+
+        // power for end acceleration - hardcode to maximum - needed for emergency stop
+        if ( pstep->params.go_to.p.Stp_ct[i] )
+        {
+            pwr_end = pwr_ct + 2;
+            if ( pwr_end > mpwr_full )
+                pwr_end = mpwr_full;
+        }
+        else
+            pwr_end = 1;
+
+        pstep->params.go_to.pwr[i].pwr_start = pwr_bgn;
+        pstep->params.go_to.pwr[i].pwr_ct = pwr_ct;
+        pstep->params.go_to.pwr[i].pwr_end = pwr_end;
+    }
+}
 
 
 static int internal_sequence_precalculate( struct SMotionSequence *crt_seq, struct SMotionSequence *next_seq, struct SStepFifoElement *pstep )
@@ -949,6 +1058,8 @@ static int internal_sequence_precalculate( struct SMotionSequence *crt_seq, stru
         pstep->params.go_to.p.Acc[i] = ( (((uint64)ACC_FACTOR_FP32) << (FPlen+10)) * dists[i] ) / L;
     }
 
+    internal_calculate_power_levels( pstep );
+
     // Calculate acceleration/deceleration distances
     if ( internal_calculate_accdec_distances( pstep, L, dists, startspeed, stepspeed, endspeed ) )
         return -1;
@@ -1009,9 +1120,21 @@ static int internal_step_precalculator( void )
 static inline void internal_seqpoll_run_goto( struct SStepFifoElement *stp )
 {
     struct SMotionCoreISRaction action;
+    int i;
+
     // do not introduce new action till isr didn't finished completely the current one
     if ( stepper_check_action_busy() )
         return;
+
+    // set up start power for all axis
+    for (i=0; i<CNC_MAX_COORDS; i++)
+    {
+        if ( core.status.pwr[i].set_pwr == mpwr_auto )
+        {
+            internal_pwr_set_axis_power(i, stp->params.go_to.pwr[i].pwr_start, 0 );
+        }
+    }
+    core.status.pwr_last_isr_status = MCISR_STATUS_IDLE;
 
     action.p = stp->params.go_to.p;
     action.channel_active = stp->params.go_to.channel_active;
@@ -1040,15 +1163,61 @@ static inline void internal_seqpoll_run_spindle_speed( struct SStepFifoElement *
 
 static void internal_sequencer_poll( struct SEventStruct *evt )
 {
+    // NOTE: It enters here only for is_started state - no need to check inside
+
     // if sequence is in run - keep it working
     if ( core.status.is_running )
     {
         switch ( core.status.crt_stp.seqType )
         {
             case SEQ_TYPE_GOTO:
-                if ( stepper_check_in_progress() == false )  // stepping action is finished (and no new one initiated)
+                if ( stepper_check_in_progress() == false )         // stepping action is finished (and no new one initiated)
                 {
+                    int i;
                     core.status.is_running = false;
+                    // if auto power - set up idle power after 20ms. If a new sequence is pushed in, it will override this
+                    for (i=0; i<CNC_MAX_COORDS; i++)
+                    {
+                        if ( core.status.pwr[i].set_pwr == mpwr_auto )
+                        {
+                            internal_pwr_set_axis_power(i, mpwr_low, 2 );       // power down after 20ms
+                        }
+                    }
+                }
+                else                                                // still running
+                {
+                    // check for power level adjustment
+                    register uint32 isr_status;
+                    isr_status = isr.state;     // this sould be atomic
+                    if ( isr_status != core.status.pwr_last_isr_status )
+                    {
+                        int i;
+                        core.status.pwr_last_isr_status = isr_status;
+                        switch ( isr_status )
+                        {
+                            case MCISR_STATUS_RUP:
+                                for (i=0; i<CNC_MAX_COORDS; i++)
+                                {
+                                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
+                                        internal_pwr_set_axis_power(i, core.status.crt_stp.params.go_to.pwr[i].pwr_start, 0);
+                                }
+                                break;
+                            case MCISR_STATUS_CT:
+                                for (i=0; i<CNC_MAX_COORDS; i++)
+                                {
+                                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
+                                        internal_pwr_set_axis_power(i, core.status.crt_stp.params.go_to.pwr[i].pwr_ct, 0);
+                                }
+                                break;
+                            case MCISR_STATUS_RDOWN:
+                                for (i=0; i<CNC_MAX_COORDS; i++)
+                                {
+                                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
+                                        internal_pwr_set_axis_power(i, core.status.crt_stp.params.go_to.pwr[i].pwr_end, 0);
+                                }
+                                break;
+                        }
+                    }
                 }
                 break;
             case SEQ_TYPE_HOLD:
@@ -1075,6 +1244,13 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
                 case SEQ_TYPE_SPINDLE:
                     internal_seqpoll_run_spindle_speed( &stp );
                     break;
+            }
+        }
+        else
+        {
+            if ( internal_sequence_fifo_fullness() )
+            {
+                evt->cnc_motion_warn_starving = 1;
             }
         }
     }
@@ -1105,6 +1281,7 @@ void motion_poll( struct SEventStruct *evt )
         internal_sequencer_poll( evt );
     }
 
+    internal_pwr_check_and_update_status( evt->timer_tick_10ms );
 
 }
 
@@ -1117,16 +1294,25 @@ void motion_poll( struct SEventStruct *evt )
  * *************************************************/
 
 
-void motion_pwr_ctrl( uint32 axis, uint32 power )
+void motion_pwr_ctrl( uint32 axis, enum EPowerLevel power )
 {
+    if ( core.status.pwr[axis].set_pwr == (uint8)power )
+        return;
 
-
+    core.status.pwr[axis].set_pwr = power;
+    if ( (power == mpwr_auto) && (core.status.is_running == false) )
+    {
+        internal_pwr_set_axis_power( axis, mpwr_low, 0 );
+    }
+    if ( power != mpwr_auto )
+    {
+        internal_pwr_set_axis_power( axis, power, 0 );
+    }
 }
 
 bool motion_pwr_is_set( uint32 axis )
 {
-
-    return true;
+    return core.status.pwr[axis].is_dirty ? false : true;
 }
 
 
