@@ -11,9 +11,6 @@
     #define MAX_SEQ_FIFO       32        // 
     #define MAX_STEP_FIFO      4         // 368 bytes fifo
 
-    #define START_FEED         100       // use 100mm/min as start-up feed - it is used for stopping also
-    #define MINIMUM_FEED        20       // this is the absolute minimum feed speed usable on the machine
-
     struct SMotionCoreActionCommon              // struct. size = 84
     {
         struct SStepCoordinates dest_poz;       // destination coordinate
@@ -172,7 +169,9 @@
         uint32  ckmask;                         // bitmask with channels where clock signal is set
         uint32  ckoff[CNC_MAX_COORDS];          // clock off timeout
 
-        int32   scale_factor;                   // speed scale factor: +/- 200 %.   0 - means no scale, +200% - 2x faster, -200% - 2x slower 
+        int32   scale_factor;                   // speed scale factor in use: 0 - not used, <0 - slow down, >0 - speed up
+        uint32  sf_ctr;                         // 16bit fractional counter
+        uint32  sf_val;                         // 16bit fractional increment value
 
         struct SStepCoordinates crt_poz;        // current position
                                                 

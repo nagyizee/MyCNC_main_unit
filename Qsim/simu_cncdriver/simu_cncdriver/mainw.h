@@ -109,5 +109,6 @@ private:
     void HW_wrp_feed_seq();
     void HW_wrp_stop();
     void HW_wrp_set_speedFactor( int factor );
+};
 
 #endif // MAINW_H

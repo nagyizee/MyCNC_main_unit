@@ -150,27 +150,39 @@ extern void event_ISR_set10ms( void );
 static uint32 ISR_counter = 0;
 
 
-static inline uint32 local_isr_step_speed_factor( int i )
+static inline int local_isr_speed_scale(void)
 {
-    if ( isr.scale_factor == 0 )
-        return isr.crt_action.p.Stp_crt[i];
+    if ( isr.scale_factor == 0 )        // no speed scaling - consider each tick
+        return 1;
     else
     {
-        uint32 maxsp = CNC_MAX_FEED_STEP;
-        uint32 sp = isr.crt_action.p.Stp_crt[i];
-
-        if ( isr.scale_factor > 0 )
-            sp = sp + (uint32)(((uint64)sp * isr.scale_factor) / 200);
-        else
-            sp = sp - (uint32)(((uint64)(sp >> 1) * isr.scale_factor) / 200);
+        if ( isr.scale_factor < 0 )     // slow down clock by dropping ticks
+        {
+            isr.sf_ctr += isr.sf_val;
+            if ( (isr.sf_ctr & 0xFFFF0000) == 0)        // check if counter surpassed 16bit -> means that tick can be considered
+                return 1;
+            isr.sf_ctr &= ~0xFFFF0000;                  // clean the upper 16bit
+            return 0;
+        }
+        else                            // speed up clock by duplicating addition
+        {
+            isr.sf_ctr += isr.sf_val;
+            if ( isr.sf_ctr & 0xFFFF0000)               // check if counter surpassed 16bit -> means that tick needs to be duplicated
+            {
+                isr.sf_ctr &= ~0xFFFF0000;              // clean the upper 16bit
+                return 2;
+            }
+            return 1;
+        }
     }
+    return 1;
 }
 
-static inline void local_isr_step_channel( int i, uint32 speed )
+
+static inline void local_isr_step_channel( int i )
 {
     // increment distance counter
-    isr.op.D[i] += speed;
-
+    isr.op.D[i] += isr.crt_action.p.Stp_crt[i];
     // step when integer part changes
     if ( isr.op.Dprev[i] != (uint32)(isr.op.D[i] >> 32) )
     {
@@ -322,31 +334,36 @@ void StepTimerIntrHandler (void)
     if ( isr.state )
     {
         int i;
+        int n;
 
         StepDBG_TickCount();
 
-        for ( i=0; i<CNC_MAX_COORDS; i++ )
+        n = local_isr_speed_scale();
+        while ( n )
         {
-            if ( isr.ckmask & (1 << i) )
-                local_isr_step_turn_channel_off(i);
-
-            if ( isr.crt_action.channel_active & (1 << i) ) // channel is in move
+            for ( i=0; i<CNC_MAX_COORDS; i++ )
             {
-                uint32 speed;
-                speed = local_isr_step_speed_factor(i);
-                local_isr_step_channel(i, speed );
+                if ( isr.ckmask & (1 << i) )
+                    local_isr_step_turn_channel_off(i);
+
+                if ( isr.crt_action.channel_active & (1 << i) ) // channel is in move
+                {
+                    local_isr_step_channel(i);
+                }
             }
-        }
 
-        local_isr_recalculate_speeds();
+            local_isr_recalculate_speeds();
 
-        // if movement action is finished, set to idle and if available start a new one
-        if ( isr.crt_action.channel_active == 0 )
-        {
-            isr.state = MCISR_STATUS_IDLE;
-            StepDBG_SegmentFinished();
-            if ( isr.next_action.channel_active )
-                local_isr_peek_next_action();
+            // if movement action is finished, set to idle and if available start a new one
+            if ( isr.crt_action.channel_active == 0 )
+            {
+                isr.state = MCISR_STATUS_IDLE;
+                StepDBG_SegmentFinished();
+                if ( isr.next_action.channel_active )
+                    local_isr_peek_next_action();
+            }
+
+            n--;
         }
     }
     else
@@ -459,10 +476,22 @@ void stepper_stop()
 }
 
 
-void stepper_scale_factor( uint32 factor )
+void stepper_scale_factor( int32 factor )
 {
+    uint32 inc_val = 0;
+
+    if ( factor )
+    {
+        if ( factor < 0 )
+            inc_val = 0x8000 + 0x8000 * ( 200 - factor) / -200;
+        else
+            inc_val = 0x10000 * factor / 200;
+    }
+
     __disable_interrupt();
     isr.scale_factor = factor;
+    isr.sf_ctr = 0;
+    isr.sf_val = inc_val;
     __enable_interrupt();
 }
 
@@ -876,8 +905,8 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
     // figure out the start speed
     if ( core.status.motion.prev_speed == 0 )       // starting from speed 0
     {   
-        if ( crt_seq->params.go_to.feed > START_FEED )
-            fstart = START_FEED;
+        if ( crt_seq->params.go_to.feed > CNC_START_FEED )
+            fstart = CNC_START_FEED;
         else
             fstart = crt_seq->params.go_to.feed;
     }
@@ -893,15 +922,15 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
         // full stop should be carried out no matter what speed has the next sequence
         core.status.motion.prev_speed = 0;      // indicating that this sequence stopped, start speed for the next sequence is from 0
         CosTheta = 0;
-        fend = MINIMUM_FEED;                    //
+        fend = CNC_MIN_FEED;                    //
     }
     else
     {
         if ( CosTheta > 0.96 )      // if angle between vectors < 15* - do not consider it - regard it as straight line
             CosTheta = 1;
         fend = (uint32)(next_seq->params.go_to.feed * CosTheta);        // relative speed for the next sequence
-        if ( fend < MINIMUM_FEED )
-            fend = MINIMUM_FEED;
+        if ( fend < CNC_MIN_FEED )
+            fend = CNC_MIN_FEED;
         if ( fend > crt_seq->params.go_to.feed )        // never accelerate the current sequence end because of the next sequence
         {
             fend = crt_seq->params.go_to.feed;
@@ -952,8 +981,8 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
     if ( CosTheta )
     {
         core.status.motion.prev_speed = fend * CosTheta;        // relative speed for the next sequence
-        if ( core.status.motion.prev_speed < MINIMUM_FEED )
-            core.status.motion.prev_speed = MINIMUM_FEED;
+        if ( core.status.motion.prev_speed < CNC_MIN_FEED )
+            core.status.motion.prev_speed = CNC_MIN_FEED;
     }
 
     *feed_start = fstart;
@@ -1229,9 +1258,18 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
                          (core.status.motion.scale_crt != core.status.motion.scale_set) )
                     {
                         if (core.status.motion.scale_crt < core.status.motion.scale_set)
-                            core.status.motion.scale_crt++; 
+                        {
+                            core.status.motion.scale_crt +=2; 
+                            if ( core.status.motion.scale_crt > core.status.motion.scale_set )
+                                core.status.motion.scale_crt = core.status.motion.scale_set;
+                        }
                         else
-                            core.status.motion.scale_crt--;
+                        {
+                            core.status.motion.scale_crt -=2;
+                            if ( core.status.motion.scale_crt < core.status.motion.scale_set )
+                                core.status.motion.scale_crt = core.status.motion.scale_set;
+                        }
+
                         stepper_scale_factor( core.status.motion.scale_crt );
                     }
 
@@ -1447,7 +1485,7 @@ void motion_sequence_stop( void )
     internal_step_fifo_flush();
 
     // set up low power for all axis after 100ms
-    for (i=0; i<CNC_MAX_COORD; i++)
+    for (i=0; i<CNC_MAX_COORDS; i++)
     {
         if ( core.status.pwr[i].set_pwr == mpwr_auto )
         {
@@ -1503,10 +1541,10 @@ uint32 motion_sequence_crt_seqID( void )
 
 void motion_feed_scale( int factor )
 {
-    core.status.motion.scale_crt = factor;
+    core.status.motion.scale_set = factor;
     if ( core.status.is_running == false )
     {
-        core.status.motion.scale_set = factor;
+        core.status.motion.scale_crt = factor;
         stepper_scale_factor( factor );
     }
 }

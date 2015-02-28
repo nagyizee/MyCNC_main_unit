@@ -16,7 +16,7 @@ int tiv;
 
 #define C(a)  (a * 400)
 
-
+/*
 struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(10), C(0), 0 },
                                         { C(15), C(20), C(0), 0 },
@@ -24,6 +24,19 @@ struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(20), C(0), 0 }
 };
 TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200 };
+*/
+
+
+// long run stuff
+struct SStepCoordinates CoordList[] = { { C(10), C(10), C(0), 0 },
+                                        { C(120), C(10), C(0), 0 },
+                                        { C(120), C(40), C(0), 0 },
+                                        { C(10), C(40), C(0), 0 },
+                                        { C(120), C(10), C(0), 0 },
+                                        { C(70), C(20), C(0), 0 },
+};
+TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200, 1200 };
+
 
 
 
@@ -124,6 +137,7 @@ struct SAccelDebug
     int sense;
     bool dirty;
     int pwr[CNC_MAX_COORDS];
+    int segment_ticks;
 } accel;
 
 int seq_ctr = 0;
@@ -383,7 +397,6 @@ void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *
     if ( dbg_step.log_file )
     {
         dbg_step.step_count = 0;
-        dbg_step.tick_count = 0;
         fprintf(dbg_step.log_file, "L: xyz[%06d,%06d,%06d] <-> xyz[%06d,%06d,%06d]\n", c1->coord[0], c1->coord[1], c1->coord[2], c2->coord[0], c2->coord[1], c2->coord[2]);
         dbg_step.c1 = *c1;
         dbg_step.c2 = *c2;
@@ -394,7 +407,9 @@ void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *
 void StepDBG_SegmentFinished()
 {
     accel.dirty = true;
+    accel.segment_ticks = dbg_step.tick_count;
     accel.phase = 3;
+    dbg_step.tick_count = 0;
     if ( dbg_step.log_file )
     {
         fprintf(dbg_step.log_file, "\n");
@@ -619,6 +634,7 @@ void mainw::Disp_Redraw( bool redrw_ui )
             ui->nm_rotor_pwr_y->setValue( accel.pwr[1] );
             ui->nm_rotor_pwr_z->setValue( accel.pwr[2] );
             ui->nm_rotor_pwr_a->setValue( accel.pwr[3] );
+            ui->nm_ticks->setValue( accel.segment_ticks );
 
             accel.dirty = false;
         }

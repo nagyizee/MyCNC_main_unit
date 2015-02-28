@@ -27,6 +27,8 @@
     #define ACC_FACTOR_FP32     ((uint32)( (uint64)(9000LL << 32) / (STEP_CLOCK * ( STEP_CLOCK / 2 )) ))    // 9000step/sec diff in 1/2 sec   
     #define ACC_FACTOR_MMPM     ( 162039 )              // 162039.66   -> find out how to calculate it from FP32
 
+    #define CNC_START_FEED      100       // use 100mm/min as start-up feed - it is used for stopping also
+    #define CNC_MIN_FEED        20        // this is the absolute minimum feed speed usable on the machine
     #define CNC_MAX_FEED        1500
     #define CNC_MAX_FEED_STEP   ( (uint32)(  (((uint64)(CNC_MAX_FEED)<<32LL) * 400LL)  / (60*STEP_CLOCK) )  )
 
