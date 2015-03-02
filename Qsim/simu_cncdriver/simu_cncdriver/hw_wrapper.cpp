@@ -21,9 +21,10 @@ struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(10), C(0), 0 },
                                         { C(15), C(20), C(0), 0 },
                                         { C(12), C(20), C(0), 0 },
+                                        { 0, 0, 0, 0 },                 // dummy for hold time
                                         { C(10), C(20), C(0), 0 }
 };
-TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200 };
+TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 0x8000 | 5 ,1200 };
 
 
 /*
@@ -511,9 +512,24 @@ void mainw::HW_wrp_feed_seq()
     int str_size = (sizeof(CoordList) / sizeof(struct SStepCoordinates));
     m.cmdID = lst & 0xff;
     m.seqID = lst & 0xff;
-    m.seqType = SEQ_TYPE_GOTO;
-    m.params.go_to.feed = speeds[lst];
-    m.params.go_to.coord = CoordList[lst];
+
+    if ( speeds[lst] & 0x8000 )
+    {
+        m.seqType = SEQ_TYPE_HOLD;
+        m.params.hold = speeds[lst] & ~0xC000;
+    }
+    else if ( speeds[lst] & 0x4000 )
+    {
+        m.seqType = SEQ_TYPE_SPINDLE;
+        m.params.spindle = speeds[lst] & ~0xC000;
+    }
+    else
+    {
+        m.seqType = SEQ_TYPE_GOTO;
+        m.params.go_to.feed = speeds[lst];
+        m.params.go_to.coord = CoordList[lst];
+    }
+
     motion_sequence_insert( &m );
 
     lst++;

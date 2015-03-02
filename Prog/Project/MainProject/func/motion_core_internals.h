@@ -114,9 +114,12 @@
 
         struct SStepFifoElement  crt_stp;               // sequence currently in run in ISR
         struct SMotionInternals  motion;                // internal status and saved precalculations for generating the next motion
+
         struct SDriverPower      pwr[CNC_MAX_COORDS];   // power settings for axis
         bool                     pwr_check;             // set when need to check power setup completion, cleared when all dirty flags are false
         uint32                   pwr_last_isr_status;   // last ISR status for power update
+
+        uint32                   timeout;               // timeout in 10ms units used for hold time
     };
 
 

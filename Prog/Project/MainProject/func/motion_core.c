@@ -1087,6 +1087,9 @@ static int internal_sequence_precalculate( struct SMotionSequence *crt_seq, stru
         }
     }
 
+    if ( pstep->params.go_to.channel_active == 0 )
+        return -1;
+
     L = internal_calculate_speeds_and_distance( crt_seq, next_seq, &feed_start, &feed_end );
 
     // Calculate stepspeed ( see explanation abowe )
@@ -1173,6 +1176,7 @@ static int internal_step_precalculator( void )
     else
     {
         // for the other sequences
+        // (this handles the hold time also - union)
         pstep->params.spindle = crt_seq->params.spindle;
         //location for note#0001 from motion_core_internals.h
     }
@@ -1216,7 +1220,9 @@ static inline void internal_seqpoll_run_goto( struct SStepFifoElement *stp )
 
 static inline void internal_seqpoll_run_hold_time( struct SStepFifoElement *stp )
 {
-
+    core.status.timeout = stp->params.hold * 100;
+    core.status.is_running = true;
+    core.status.crt_stp = *stp;
 }
 
 static inline void internal_seqpoll_run_spindle_speed( struct SStepFifoElement *stp )
@@ -1310,6 +1316,15 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
                 }
                 break;
             case SEQ_TYPE_HOLD:
+                if ( core.status.timeout )
+                {
+                    if ( evt->timer_tick_10ms )
+                        core.status.timeout--;
+                }               
+                else
+                {
+                    core.status.is_running = false;
+                }
                 break;
             case SEQ_TYPE_SPINDLE:
                 break;
