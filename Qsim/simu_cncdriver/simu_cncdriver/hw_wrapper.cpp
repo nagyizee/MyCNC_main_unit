@@ -16,7 +16,7 @@ int tiv;
 
 #define C(a)  (a * 400)
 
-/*
+
 struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(10), C(0), 0 },
                                         { C(15), C(20), C(0), 0 },
@@ -24,9 +24,9 @@ struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(20), C(0), 0 }
 };
 TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200 };
-*/
 
 
+/*
 // long run stuff
 struct SStepCoordinates CoordList[] = { { C(10), C(10), C(0), 0 },
                                         { C(120), C(10), C(0), 0 },
@@ -36,7 +36,7 @@ struct SStepCoordinates CoordList[] = { { C(10), C(10), C(0), 0 },
                                         { C(70), C(20), C(0), 0 },
 };
 TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200, 1200 };
-
+*/
 
 
 
@@ -74,7 +74,7 @@ TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200
 
 /*
 // sharp angles - star from 20,20 coordinate
-struct SStepCoordinates CoordList[] = { { C(20), C(20), C(0), 0 },
+struct SStepCoordinates CoordList[] = { { C(20), C(20), C(0), 0 },   
                                         { C(35), C(10), C(0), 0 },  // 0.1961161351666954
 
                                         { C(20), C(20), C(0), 0 },  

@@ -819,11 +819,10 @@ static inline int internal_calculate_accdec_distances( struct SStepFifoElement *
 }
 
 
-static inline double internal_calculate_cosTheta( uint64 Len1, struct SMotionSequence *crt_seq, struct SMotionSequence *next_seq )
+static inline uint32 internal_calculate_cosTheta( uint64 Len1, struct SMotionSequence *crt_seq, struct SMotionSequence *next_seq )
 {
-    double cosT;
-    double L1;
-    double L2;
+    uint32 L1;
+    uint32 L2;
     int i;
     int64 dot_prod = 0;
 
@@ -843,12 +842,16 @@ static inline double internal_calculate_cosTheta( uint64 Len1, struct SMotionSeq
     }
 
     // magnitude of vectors (lengths)
-    L1 = (double)Len1 / (1LL<<FPlen);
-    L2 = (double)core.status.motion.next_L / (1LL<<FPlen);
+    L1 = (Len1 >> FPlen);
+    L2 = (core.status.motion.next_L >> FPlen);
 
     // calculate cosT:
-    cosT = (double)dot_prod / ( L1 * L2 );
-    return cosT;
+    // L1, L2 are in integer steps
+    // dot prod is max 36 bit, we will add 24bits for precision - 60bits + sign
+    if ( dot_prod > 0 )
+        return (uint32)(( (uint64)dot_prod << 24 ) / ( (uint64)L1 * (uint64)L2 ));
+    else
+        return 0;   // for sharp angles ( < 90* ) we pass 0 because it needs a full stop
 }
 
 
@@ -856,7 +859,7 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
 {
     uint64 ret_val;
     uint64 sum;
-    double CosTheta;
+    uint32 CosTheta;
     int i;
 
     uint32 fstart;
@@ -915,20 +918,19 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
         fstart = core.status.motion.prev_speed;
     }
 
-    // figure out the end speed
+    // figure out the end speed. CosTheta is given in FP24 - accurate till 4th decimal after dot
     CosTheta = internal_calculate_cosTheta( ret_val, crt_seq, next_seq );
-    if ( CosTheta <= 0 )
+    if ( CosTheta == 0 )
     {
         // full stop should be carried out no matter what speed has the next sequence
         core.status.motion.prev_speed = 0;      // indicating that this sequence stopped, start speed for the next sequence is from 0
-        CosTheta = 0;
         fend = CNC_MIN_FEED;                    //
     }
     else
     {
-        if ( CosTheta > 0.96 )      // if angle between vectors < 15* - do not consider it - regard it as straight line
-            CosTheta = 1;
-        fend = (uint32)(next_seq->params.go_to.feed * CosTheta);        // relative speed for the next sequence
+        if ( CosTheta > ( (uint32)(0.96 * (1<<24)) ) )     // if angle between vectors < 15* - do not consider it - regard it as straight line
+            CosTheta = (1 << 24);
+        fend = (uint32)( ((uint64)next_seq->params.go_to.feed * CosTheta) >> 24 );        // relative speed for the next sequence
         if ( fend < CNC_MIN_FEED )
             fend = CNC_MIN_FEED;
         if ( fend > crt_seq->params.go_to.feed )        // never accelerate the current sequence end because of the next sequence
@@ -980,7 +982,7 @@ static inline uint64 internal_calculate_speeds_and_distance( struct SMotionSeque
     // save the end speed for the next iteration with cosTheta
     if ( CosTheta )
     {
-        core.status.motion.prev_speed = fend * CosTheta;        // relative speed for the next sequence
+        core.status.motion.prev_speed = (uint32)( ((uint64)fend * CosTheta) >> 24 ); // relative speed for the next sequence
         if ( core.status.motion.prev_speed < CNC_MIN_FEED )
             core.status.motion.prev_speed = CNC_MIN_FEED;
     }

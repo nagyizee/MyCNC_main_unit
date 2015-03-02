@@ -83,14 +83,15 @@
 
 
 
-    // sets the spindle speed
+    // sets the spindle speed - works only in stopped state
+    // in working state spindle speed is controlled by sequences
     // 0 - spindle stopped
     // 0-TBD - spindle speed
     // Call motion_spindle_is_ok() for busy state
     void motion_spindle( TSpindleSpeed speed );
 
-    // Scale the spindle speed with +/- factor. Value is 0 - 500.
-    // 0 - no scale, +500 - speed up with x5, -500 - speed down with x5
+    // Scale the spindle speed with +/- factor. Value is 0 - 200.
+    // 0 - no scale, +200 - speed up with x2, -200 - speed down with x2
     // it applies the factor in progressive way, no need to wait for it
     void motion_spindle_scale( int factor );
 
