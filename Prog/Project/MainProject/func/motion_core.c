@@ -420,6 +420,7 @@ int     stepper_add_action( struct SMotionCoreISRaction *action )
     __disable_interrupt();
     isr.next_action = *action;
     __enable_interrupt();
+    return 0;
 }
 
 #define stepper_check_action_busy()     ( isr.crt_action.channel_active )       // do not do double buffering - check always the current action
@@ -1477,7 +1478,7 @@ int motion_sequence_start( void )
 {
     struct SEventStruct evt = { 0, };
     if ( core.status.is_started )
-        return;
+        return 0;
 
     core.status.is_started = true;
     if ( internal_step_precalculator() )

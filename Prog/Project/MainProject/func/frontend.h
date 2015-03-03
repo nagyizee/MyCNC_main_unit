@@ -87,11 +87,11 @@
     // use the defines FE_TOUCH_?
     // will return -1 if other op. in pending or spindle is running - can be executed with stopped spindle only
     // Async op.
-    int front_end_request_touch_detection( RMuint32 touch_mask );
+    int front_end_request_touch_detection( uint32 touch_mask );
 
     // if the request_touch_detection operation is completed - this returns the bitmask.
     // returns 0 - on succes, -1 if faulty call or pending
-    int front_end_get_touched_list( RMuint32 *touch_mask );
+    int front_end_get_touched_list( uint32 *touch_mask );
 
 
     // generic and debug
@@ -111,6 +111,8 @@
     // Sync op.
     int front_end_dbg_get_signals( uint8 *sig );
 
+    // set raw control value for spindle regulator
+    int front_end_dbg_set_raw_spindle( uint32 raw_val );
 
 
 

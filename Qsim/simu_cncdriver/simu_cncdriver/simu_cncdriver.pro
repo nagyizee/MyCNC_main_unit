@@ -33,6 +33,7 @@ HEADERS  += mainw.h \
     ../../../Prog/Project/MainProject/func/motion_core.h \
     ../../../Prog/Project/MainProject/func/motion_core_internals.h \
     ../../../Prog/Project/MainProject/func/frontend.h \
-    ../../../Prog/Project/MainProject/func/frontend_internals.h
+    ../../../Prog/Project/MainProject/func/frontend_internals.h \
+    ../../../Prog/Project/MainProject/func/comm_fe.h
 
 FORMS    += mainw.ui

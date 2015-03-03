@@ -70,6 +70,8 @@
     void motion_set_crt_coord( struct SStepCoordinates *coord );
 
     // get the current stepper coordinates
+
+
     void motion_get_crt_coord( struct SStepCoordinates *coord );
 
     // Set up endpoint values. NULL will clear them

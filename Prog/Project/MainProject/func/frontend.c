@@ -1,11 +1,12 @@
+#include <string.h>
 #include "hw_stuff.h"
 #include "events_ui.h"
 #include "frontend.h"
+#include "frontend_internals.h"
+#include "comm_fe.h"
 
 
-
-
-
+struct SFrontEndStruct fe;
 
 
 /* *************************************************
@@ -28,19 +29,21 @@
 
     int front_end_init( void )
     {
-
+        memset( &fe, 0, sizeof(fe) );
         return 0;
     }
 
     void front_end_poll( struct SEventStruct *evt )
     {
 
+
          
     }
 
     bool front_end_chek_op_busy( void )
     {
-
+        if ( fe.op )
+            return true;
         return false;
     }
 
@@ -54,7 +57,7 @@
 
     int front_end_spindle_power( bool enable )
     {
-
+        
         return 0;
     }
 
@@ -108,14 +111,14 @@
     }
 
 
-    int front_end_request_touch_detection( RMuint32 touch_mask )
+    int front_end_request_touch_detection( uint32 touch_mask )
     {
 
         return 0;
     }
 
 
-    int front_end_get_touched_list( RMuint32 *touch_mask )
+    int front_end_get_touched_list( uint32 *touch_mask )
     {
 
         return 0;
@@ -130,6 +133,13 @@
 
 
     int front_end_dbg_get_signals( uint8 *sig )
+    {
+
+        return 0;
+    }
+
+
+    int front_end_dbg_set_raw_spindle( uint32 raw_val )
     {
 
         return 0;

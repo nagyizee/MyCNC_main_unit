@@ -549,6 +549,33 @@ void mainw::HW_wrp_set_speedFactor( int factor )
     motion_feed_scale( factor );
 }
 
+
+
+/////////////////////////////////////////////////////
+// front end simulation
+/////////////////////////////////////////////////////
+
+uint32 commfe_init()
+{
+
+    return 0;
+}
+
+uint32 commfe_sendCommand( uint8 *fecmd, uint32 cmd_len, uint32 ret_len )
+{
+
+    return 0;
+}
+
+uint32 commfe_sendCommand_waitResponse( uint8 *fecmd, uint32 cmd_len, uint32 ret_len )
+{
+
+    return 0;
+}
+
+
+
+
 /////////////////////////////////////////////////////
 // Display simulation
 /////////////////////////////////////////////////////
