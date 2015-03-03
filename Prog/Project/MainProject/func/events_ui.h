@@ -35,6 +35,10 @@
         uint32  button_pressed_emerg:1;     // emergency button pressed - refresh - instant
         uint32  button_pressed_resume:1;
         uint32  button_pressed_toolchange:1;
+
+        uint32  fe_spindle_jam:1;           // flag set by front_end_poll when spindle jam is detected
+        uint32  fe_op_completed:1;          // flag set by front_end_poll when an operation is finished - set for succeeded and failed also
+        uint32  fe_op_failed:1;             // flag set by front_end_poll when an operation is failed ( set together with fe_op_completed )
     };
 
 

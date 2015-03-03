@@ -133,367 +133,12 @@
      </property>
     </widget>
    </widget>
-   <widget class="QGroupBox" name="groupBox_2">
-    <property name="geometry">
-     <rect>
-      <x>1080</x>
-      <y>480</y>
-      <width>351</width>
-      <height>111</height>
-     </rect>
-    </property>
-    <property name="title">
-     <string/>
-    </property>
-    <widget class="QSpinBox" name="nm_stepx">
-     <property name="geometry">
-      <rect>
-       <x>30</x>
-       <y>25</y>
-       <width>81</width>
-       <height>22</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_stepy">
-     <property name="geometry">
-      <rect>
-       <x>30</x>
-       <y>45</y>
-       <width>81</width>
-       <height>22</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_stepz">
-     <property name="geometry">
-      <rect>
-       <x>30</x>
-       <y>65</y>
-       <width>81</width>
-       <height>22</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_stepa">
-     <property name="geometry">
-      <rect>
-       <x>30</x>
-       <y>85</y>
-       <width>81</width>
-       <height>22</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label">
-     <property name="geometry">
-      <rect>
-       <x>18</x>
-       <y>26</y>
-       <width>16</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>X:</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_2">
-     <property name="geometry">
-      <rect>
-       <x>19</x>
-       <y>46</y>
-       <width>16</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Y:</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_3">
-     <property name="geometry">
-      <rect>
-       <x>18</x>
-       <y>65</y>
-       <width>16</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Z:</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_4">
-     <property name="geometry">
-      <rect>
-       <x>18</x>
-       <y>85</y>
-       <width>16</width>
-       <height>16</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>A:</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_5">
-     <property name="geometry">
-      <rect>
-       <x>40</x>
-       <y>3</y>
-       <width>61</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Step Coords</string>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_stepy_2">
-     <property name="geometry">
-      <rect>
-       <x>124</x>
-       <y>45</y>
-       <width>31</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_stepa_2">
-     <property name="geometry">
-      <rect>
-       <x>124</x>
-       <y>85</y>
-       <width>31</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_stepz_2">
-     <property name="geometry">
-      <rect>
-       <x>124</x>
-       <y>65</y>
-       <width>31</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_stepx_2">
-     <property name="geometry">
-      <rect>
-       <x>124</x>
-       <y>25</y>
-       <width>31</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_6">
-     <property name="geometry">
-      <rect>
-       <x>128</x>
-       <y>3</y>
-       <width>21</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>pwr</string>
-     </property>
-    </widget>
-    <widget class="QCheckBox" name="cb_end">
-     <property name="geometry">
-      <rect>
-       <x>170</x>
-       <y>70</y>
-       <width>70</width>
-       <height>17</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>End</string>
-     </property>
-    </widget>
-    <widget class="QCheckBox" name="cb_const">
-     <property name="geometry">
-      <rect>
-       <x>170</x>
-       <y>50</y>
-       <width>70</width>
-       <height>17</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Const</string>
-     </property>
-    </widget>
-    <widget class="QCheckBox" name="cb_start">
-     <property name="geometry">
-      <rect>
-       <x>170</x>
-       <y>30</y>
-       <width>70</width>
-       <height>17</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Start</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_7">
-     <property name="geometry">
-      <rect>
-       <x>170</x>
-       <y>10</y>
-       <width>46</width>
-       <height>13</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>accel:</string>
-     </property>
-    </widget>
-    <widget class="QCheckBox" name="cb_acc">
-     <property name="geometry">
-      <rect>
-       <x>220</x>
-       <y>30</y>
-       <width>70</width>
-       <height>17</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Acc</string>
-     </property>
-    </widget>
-    <widget class="QCheckBox" name="cb_dec">
-     <property name="geometry">
-      <rect>
-       <x>220</x>
-       <y>50</y>
-       <width>70</width>
-       <height>17</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Dec</string>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_seqctr">
-     <property name="geometry">
-      <rect>
-       <x>280</x>
-       <y>10</y>
-       <width>61</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>99999</number>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_8">
-     <property name="geometry">
-      <rect>
-       <x>255</x>
-       <y>8</y>
-       <width>21</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>seq:</string>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_10">
-     <property name="geometry">
-      <rect>
-       <x>257</x>
-       <y>30</y>
-       <width>20</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>tick:</string>
-     </property>
-    </widget>
-    <widget class="QSpinBox" name="nm_ticks">
-     <property name="geometry">
-      <rect>
-       <x>280</x>
-       <y>32</y>
-       <width>61</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="maximum">
-      <number>999999999</number>
-     </property>
-    </widget>
-   </widget>
    <widget class="QPlainTextEdit" name="tx_commands">
     <property name="geometry">
      <rect>
       <x>540</x>
       <y>470</y>
-      <width>531</width>
+      <width>281</width>
       <height>131</height>
      </rect>
     </property>
@@ -801,31 +446,6 @@
      <bool>true</bool>
     </property>
    </widget>
-   <widget class="QSlider" name="vs_simu_speed">
-    <property name="geometry">
-     <rect>
-      <x>1440</x>
-      <y>480</y>
-      <width>20</width>
-      <height>101</height>
-     </rect>
-    </property>
-    <property name="minimum">
-     <number>0</number>
-    </property>
-    <property name="maximum">
-     <number>8</number>
-    </property>
-    <property name="pageStep">
-     <number>1</number>
-    </property>
-    <property name="sliderPosition">
-     <number>8</number>
-    </property>
-    <property name="orientation">
-     <enum>Qt::Vertical</enum>
-    </property>
-   </widget>
    <widget class="QPushButton" name="pb_start">
     <property name="geometry">
      <rect>
@@ -960,6 +580,322 @@
     <property name="text">
      <string>Scale:</string>
     </property>
+   </widget>
+   <widget class="QGroupBox" name="groupBox_2">
+    <property name="geometry">
+     <rect>
+      <x>1130</x>
+      <y>480</y>
+      <width>201</width>
+      <height>121</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Soft coordinates</string>
+    </property>
+    <widget class="QLabel" name="label_3">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>60</y>
+       <width>16</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Z:</string>
+     </property>
+    </widget>
+    <widget class="QSpinBox" name="nm_stepy">
+     <property name="geometry">
+      <rect>
+       <x>22</x>
+       <y>40</y>
+       <width>81</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="maximum">
+      <number>99999</number>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>21</y>
+       <width>16</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>X:</string>
+     </property>
+    </widget>
+    <widget class="QSpinBox" name="nm_stepx">
+     <property name="geometry">
+      <rect>
+       <x>22</x>
+       <y>20</y>
+       <width>81</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="maximum">
+      <number>99999</number>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_4">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>80</y>
+       <width>16</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>A:</string>
+     </property>
+    </widget>
+    <widget class="QSpinBox" name="nm_stepz">
+     <property name="geometry">
+      <rect>
+       <x>22</x>
+       <y>60</y>
+       <width>81</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="maximum">
+      <number>99999</number>
+     </property>
+    </widget>
+    <widget class="QSpinBox" name="nm_stepa">
+     <property name="geometry">
+      <rect>
+       <x>22</x>
+       <y>80</y>
+       <width>81</width>
+       <height>22</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="maximum">
+      <number>99999</number>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_2">
+     <property name="geometry">
+      <rect>
+       <x>11</x>
+       <y>41</y>
+       <width>16</width>
+       <height>16</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Y:</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_end">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>80</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>End</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_dec">
+     <property name="geometry">
+      <rect>
+       <x>160</x>
+       <y>60</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Dec</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_const">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>60</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Const</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_start">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>40</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Start</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_7">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>20</y>
+       <width>46</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>accel:</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_acc">
+     <property name="geometry">
+      <rect>
+       <x>160</x>
+       <y>40</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Acc</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QGroupBox" name="groupBox_3">
+    <property name="geometry">
+     <rect>
+      <x>1330</x>
+      <y>480</y>
+      <width>141</width>
+      <height>121</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Simulator</string>
+    </property>
+    <widget class="QLabel" name="label_5">
+     <property name="geometry">
+      <rect>
+       <x>50</x>
+       <y>20</y>
+       <width>46</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Speed:</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_8">
+     <property name="geometry">
+      <rect>
+       <x>20</x>
+       <y>62</y>
+       <width>21</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>seq:</string>
+     </property>
+    </widget>
+    <widget class="QSlider" name="vs_simu_speed">
+     <property name="geometry">
+      <rect>
+       <x>110</x>
+       <y>12</y>
+       <width>20</width>
+       <height>101</height>
+      </rect>
+     </property>
+     <property name="minimum">
+      <number>0</number>
+     </property>
+     <property name="maximum">
+      <number>8</number>
+     </property>
+     <property name="pageStep">
+      <number>1</number>
+     </property>
+     <property name="sliderPosition">
+      <number>8</number>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </widget>
+    <widget class="QSpinBox" name="nm_seqctr">
+     <property name="geometry">
+      <rect>
+       <x>45</x>
+       <y>64</y>
+       <width>61</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="maximum">
+      <number>99999</number>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_10">
+     <property name="geometry">
+      <rect>
+       <x>22</x>
+       <y>84</y>
+       <width>20</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>tick:</string>
+     </property>
+    </widget>
+    <widget class="QSpinBox" name="nm_ticks">
+     <property name="geometry">
+      <rect>
+       <x>45</x>
+       <y>86</y>
+       <width>61</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="buttonSymbols">
+      <enum>QAbstractSpinBox::NoButtons</enum>
+     </property>
+     <property name="maximum">
+      <number>999999999</number>
+     </property>
+    </widget>
    </widget>
   </widget>
  </widget>
