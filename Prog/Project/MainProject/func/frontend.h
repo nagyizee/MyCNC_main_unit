@@ -11,7 +11,7 @@
 
     /*
      *  Front end module is a separated hardware with it's own communication stack
-     *  That's why some operations are asynchronous
+     *  That's why the operations are asynchronous
      *  Only one operation can be executed one time. Use front_end_chek_op_busy() for
      *  checking busy state, or check for ev.fe_op_completed field for completion.
      *  At completion the ev.fe_op_failed needs to be checked for failure (mainly communication failure)
@@ -44,7 +44,7 @@
 
     // spindle power on/off
     // returns 0 for success, -1 if front end is busy with other operations
-    // Sync op.
+    // Async op.
     int front_end_spindle_power( bool enable );
 
     // set spindle speed in rpm
@@ -57,7 +57,7 @@
 
     // get the current RPM
     // returns 0 for success, -1 if front end is busy with other operations
-    // Sync op.
+    // Async op.
     int front_end_get_rpm( uint32 *rpm );
 
 
@@ -76,11 +76,11 @@
     // returns true when the coordinate request was sent.
     // used to check when exactly the command was shifted out to sync the front end coordinate latch with the application's coordinate latch
     // for a more precise comparison
-    bool front_end_coordinate_request_sent( void );
+    bool front_end_is_coordinate_request_sent( void );
 
     // reset the front end's internal coordinate counters to the maximum range values
     // returns 0 if request operation is in pending, -1 if other op. is in pending
-    // Sync op.
+    // Async op.
     int front_end_coordinate_reset_to_max( void );
 
     // request end point and probe touch detection for a list given in a bitmask

@@ -139,7 +139,9 @@ static struct STIM1 *TIM1 = &stim;
 struct SMotionCoreInternals core;
 struct SMotionCoreISR       isr;
 
-extern void event_ISR_set10ms( void );
+extern void event_ISR_set10ms(void);
+extern void event_ISR_set100us(void);
+
 
 /* *************************************************
  *
@@ -147,8 +149,8 @@ extern void event_ISR_set10ms( void );
  *
  * *************************************************/
 
-static uint32 ISR_counter = 0;
-
+static uint32 ISR_counter_1 = 0;
+static uint32 ISR_counter_2 = 0;
 
 static inline int local_isr_speed_scale(void)
 {
@@ -383,11 +385,17 @@ void StepTimerIntrHandler (void)
         }
     }
     
-    ISR_counter++;
-    if ( ISR_counter == SYSTEM_T_10MS_COUNT )
+    ISR_counter_1++;
+    if ( ISR_counter_1 == SYSTEM_T_100US_COUNT )
     {
-        ISR_counter = 0;
-        event_ISR_set10ms();
+        ISR_counter_1 = 0;
+        event_ISR_set100us();
+        ISR_counter_2++;
+        if ( ISR_counter_2 == SYSTEM_T_10MS_COUNT )
+        {
+            ISR_counter_2 = 0;
+            event_ISR_set10ms();
+        }
     }
 }
 

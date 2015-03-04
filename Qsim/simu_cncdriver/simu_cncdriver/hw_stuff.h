@@ -18,7 +18,8 @@ enum EHWAxisPower
 
 
 // Always update from the real hw_stuff.h
-#define SYSTEM_T_10MS_COUNT      500            // 20us timer -> 500 systicks / 10ms
+#define SYSTEM_T_100US_COUNT     5          // 5 ISR ticks = 100us
+#define SYSTEM_T_10MS_COUNT      100        // 100 entries of 100us = 10ms
 
 #define TIMER_SYSTEM            TIM1
 

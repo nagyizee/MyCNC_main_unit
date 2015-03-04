@@ -36,6 +36,11 @@ void event_ISR_set10ms(void)
     events.timer_tick_10ms  = 1;
 }
 
+void event_ISR_set100us(void)
+{
+    events.timer_tick_100us = 1;
+}
+
 
 void Process_LED( void )
 {

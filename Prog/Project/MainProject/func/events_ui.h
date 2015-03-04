@@ -22,7 +22,7 @@
 
     struct SEventStruct
     {
-        uint32  timer_tick_system:1;        // CNC system tick - timing given by STEP_QUANTUM, the minimum timing for max step speed
+        uint32  timer_tick_100us:1;         // CNC system tick - timing given by STEP_QUANTUM, the minimum timing for max step speed
         uint32  timer_tick_10ms:1;          // 10ms timing tick
 
         uint32  comm_new_request:1;         // new message from communication port
