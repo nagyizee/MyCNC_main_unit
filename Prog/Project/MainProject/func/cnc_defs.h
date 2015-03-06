@@ -48,7 +48,7 @@
     #define DIR_A_MINUS         0
 
 
-    typedef uint32  TStepCoord;
+    typedef int32   TStepCoord;
     typedef uint16  TSpindleSpeed;
     typedef uint16  TFeedSpeed;
 

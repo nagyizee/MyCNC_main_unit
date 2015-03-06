@@ -29,6 +29,9 @@
     // flushes the response
     uint32 commfe_flushResponse( void );
 
+    // returns 1 if output fifo is empty ( command is sent )
+    uint32 commfe_is_outfifo_empty( void );
+
 
 #ifdef __cplusplus
     }

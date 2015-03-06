@@ -12,6 +12,12 @@
     #define FE_MSG_RETRY        5           // retry 5 times
     #define FE_MSG_TIMEOUT      10          // timeout on message response 1ms
 
+    #define FE_RPM_INVALID      0xffff;
+
+    #define FE_EV_SPINDLE_OK    0x01;
+    #define FE_EV_SPINDLE_JAM   0x08;
+    #define FE_EV_ENDPOINT      0x10;
+
 
     enum EFrontEndOperations
     {
@@ -27,37 +33,43 @@
 
     struct SFrontEndStatus
     {
-        uint8   spindle_on;
+        bool    spindle_on;
         uint16  spindle_rpm_set;
         uint16  spindle_rpm_get;
 
+        bool                        coord_updated;
+        struct SStepCoordinates     coord;
     };
 
 
 
-    enum EOpStatSpindlePwr
+    enum EOpStat_SpindleSpeed
     {
-        opst_spinpwr_wait_ack = 1,
+        opstat_spsp_reset_flags = 1,        // call dummy evmask poll to clear event flag
+        opstat_spsp_set_evmask1,            // set event masks for detecting spindle jam and spindle ok
+        opstat_spsp_set_speed,              // set spindle speed
+        opstat_spsp_wait_flag,              // wait for event flag
+        opstat_spsp_set_evmask2,            // set event maks for detecting spindle jam only
+        opstat_spsp_check_events            // check the captured events to see if spindle is OK
     };
 
-
-    struct SOpstat_spindlePwr
-    {
-        bool  value; 
-    };
 
 
     struct SFrontEndOpStatus
     {
         uint8 phase;                    // operation phase - each operation has it's own EOpStat enum
         uint8 retries;                  // how many retries are available
-        uint8 timeout_ctr;              // timeout counter in 100us units for receiving response
-        uint8 reserved;
+        uint16 timeout_ctr;             // timeout counter in 100us units for receiving response
         union
         {
             bool sp_pwr;
+            uint32 sp_rpm;
 
         } p;
+
+        uint8 out_msg_len;              // command message lenght
+        uint8 out_resp_len;             // response length to be wait to
+        uint8 out_msg[10];              // command message
     };
 
 

@@ -52,12 +52,13 @@
     // Async op.
     int front_end_spindle_speed( uint32 speed );
 
-    // returns 0 if speed setup is in pending, 1 if spindle speed is reached, -1 if spindle can not be set up (jammed or comm. error)
-    int front_end_check_spindle_ok( void );
-
     // get the current RPM
     // returns 0 for success, -1 if front end is busy with other operations
     // Async op.
+    int front_end_request_rpm( void );
+
+    // get the requested rpm
+    // return 0 and rpm on success, -1 if comm. failure, or request was not called
     int front_end_get_rpm( uint32 *rpm );
 
 
