@@ -12,12 +12,13 @@
     #define FE_MSG_RETRY        5           // retry 5 times
     #define FE_MSG_TIMEOUT      10          // timeout on message response 1ms
 
-    #define FE_RPM_INVALID      0xffff;
+    #define FE_RPM_INVALID      0xffff
 
-    #define FE_EV_SPINDLE_OK    0x01;
-    #define FE_EV_SPINDLE_JAM   0x08;
-    #define FE_EV_ENDPOINT      0x10;
-
+    #define FE_EV_SPINDLE_OK    0x01
+    #define FE_EV_SPINDLE_JAM   0x08
+    #define FE_EV_ENDPOINT      0x10
+    #define FE_EV_A_AXIS        0x02
+    #define FE_EV_PROBE         0x80
 
     enum EFrontEndOperations
     {
@@ -39,6 +40,8 @@
 
         bool                        coord_updated;
         struct SStepCoordinates     coord;
+
+        uint32  touch_mask;
     };
 
 
@@ -53,7 +56,19 @@
         opstat_spsp_check_events            // check the captured events to see if spindle is OK
     };
 
+    enum EOpStat_Touch
+    {
+        opstat_tch_set_evmask = 1,
+        opstat_tch_reset_events,
+        opstat_tch_wait_flag,
+        opstat_tch_set_org_evmask,
+        opstat_tch_get_events,
+    };
 
+    struct SOpStat_Touch
+    {
+        uint32   set_mask;                   // mask set up for touch detection
+    };
 
     struct SFrontEndOpStatus
     {
@@ -64,6 +79,7 @@
         {
             bool sp_pwr;
             uint32 sp_rpm;
+            struct SOpStat_Touch touch;
 
         } p;
 

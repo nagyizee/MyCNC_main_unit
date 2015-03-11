@@ -94,6 +94,11 @@
     // returns 0 - on succes, -1 if faulty call or pending
     int front_end_get_touched_list( uint32 *touch_mask );
 
+    // interrupt touch detection
+    // return 0 for success, -1 if faulty call
+    // Async op.
+    int front_end_terminate_touch_detection( void );
+
 
     // generic and debug
     // ------------------------------------------
@@ -108,7 +113,7 @@
     //                  XXXX, YYYY, ZZZZ - positive pulse for x,y,z encoders
     //                  aaaa, xlim, ylim, zlim, prbe, rpms - signal on endpoint sensors, probe and rpm sensor
     //                  All of these values are 0x1 for closed contact (0V on pad) and 0x0 for open contact (Vcc pullup on pad)
-    // sig must have 5 bytes
+    // sig must have 6 bytes
     // Sync op.
     int front_end_dbg_get_signals( uint8 *sig );
 

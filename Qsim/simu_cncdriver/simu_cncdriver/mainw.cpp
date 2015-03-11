@@ -99,6 +99,9 @@ void mainw::TimerTick()
         }
 
         StepTimerIntrHandler();
+
+        if ( i % 0x01 )
+            HW_wrp_front_end_simu();        // 25khz rate  ~235kbps
     }
 
     if ( ctdown == 0 )
@@ -243,4 +246,7 @@ void mainw::on_nm_scale_editingFinished()
     HW_wrp_set_speedFactor( ui->nm_scale->value() );
 }
 
-
+void mainw::on_pb_fe_spindle_jam_clicked()
+{
+    HW_wrp_spindle_jam();
+}

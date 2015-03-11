@@ -69,6 +69,8 @@ private slots:
 
     void on_pb_stop_clicked();
 
+    void on_pb_fe_spindle_jam_clicked();
+
 private:
     Ui::mainw *ui;
     QTimer *ticktimer;
@@ -96,6 +98,7 @@ public:
 
     void HW_assertion(const char *reason);
     void HW_wrapper_update_display( bool redrw_ui );
+    bool HW_wrp_fe_broken_link();
 
 
 
@@ -109,6 +112,9 @@ private:
     void HW_wrp_feed_seq();
     void HW_wrp_stop();
     void HW_wrp_set_speedFactor( int factor );
+    void HW_wrp_spindle_jam(void);
+
+    void HW_wrp_front_end_simu();
 };
 
 #endif // MAINW_H

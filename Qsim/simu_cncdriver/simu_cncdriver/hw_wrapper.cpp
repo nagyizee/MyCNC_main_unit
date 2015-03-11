@@ -4,7 +4,8 @@
 #include "motion_core.h"
 #include "cnc_defs.h"
 #include "hw_stuff.h"
-
+#include "comm_fe.h"
+#include "frontend_internals.h"
 
 #define MAX_AXIS_CHANNELS 4
 
@@ -12,10 +13,16 @@
 mainw *pClass;
 int tiv;
 
+#define SIMU_DEFAULT_X      0   //130*400
+#define SIMU_DEFAULT_Y      0   //46*400
+#define SIMU_DEFAULT_Z      0   //80*400
+#define SIMU_DEFAULT_A      0   //0
+
+
 /// test stuff ///////////
 
-#define C(a)  (a * 400)
 
+#define C(a)  (a * 400)
 
 struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(10), C(0), 0 },
@@ -25,7 +32,6 @@ struct SStepCoordinates CoordList[] = { { C(10), C(0), C(0), 0 },
                                         { C(10), C(20), C(0), 0 }
 };
 TFeedSpeed speeds[]     = { 1200, 1200, 1200, 1200, 0x8000 | 5 ,1200 };
-
 
 /*
 // long run stuff
@@ -440,10 +446,10 @@ void mainw::HW_wrapper_setup( int interval )
     pClass = this;
     tiv    = interval;
 
-    hw_coords.coord[COORD_X] = 0; //130*400;
-    hw_coords.coord[COORD_Y] = 0; //46*400;
-    hw_coords.coord[COORD_Z] = 0; //80*400;
-    hw_coords.coord[COORD_A] = 0; //0*400;
+    hw_coords.coord[COORD_X] = SIMU_DEFAULT_X;
+    hw_coords.coord[COORD_Y] = SIMU_DEFAULT_Y;
+    hw_coords.coord[COORD_Z] = SIMU_DEFAULT_Z;
+    hw_coords.coord[COORD_A] = SIMU_DEFAULT_A;
 
 }
 
@@ -549,31 +555,361 @@ void mainw::HW_wrp_set_speedFactor( int factor )
     motion_feed_scale( factor );
 }
 
-
+bool mainw::HW_wrp_fe_broken_link()
+{
+    return ui->pb_fe_break_link->isChecked();
+}
 
 /////////////////////////////////////////////////////
 // front end simulation
 /////////////////////////////////////////////////////
 
+const char cmd_spindle[] =  { 0xA9, 0x14 };
+const char cmd_getevents[] = { 0xAA, 0xA9 };                // has no cksum
+const char cmd_setevmask[] = { 0xA9, 0x13 };
+const char cmd_setspeed[] = { 0xA9, 0x11 };
+const char cmd_getrpm[] = { 0xA9, 0x00 };
+const char cmd_getcoord[] = { 0xAA, 0x9A };                 // no checksum here also
+const char cmd_resetcoord[] = { 0xA9, 0x05 };
+
+#define SSIMU_CMD_SPINDLE_PWR   1
+#define SSIMU_CMD_GET_EVENTS    2
+#define SSIMU_CMD_SET_EVMASK    3
+#define SSIMU_CMD_SET_SPEED     4
+#define SSIMU_CMD_GET_RPM       5
+#define SSIMU_CMD_GET_COORD     6
+#define SSIMU_CMD_RESET_COORD   7
+
+struct SSpindleSimu
+{
+    int cmd_in_run;
+    bool cmd_finished;
+
+    int resp_time;
+    int poll_ctr;
+
+    bool    spindle_on;
+    int     spindle_set_speed;
+    int     spindle_crt_speed;
+    uint32  evmask;
+
+    uint32  sensor_status;
+
+    uint32  events;
+    bool    flag;              // event flag
+    uint8   resp_data[20];
+    int     resp_len;
+
+} ssimu;
+
+
+void mainw::HW_wrp_spindle_jam(void)
+{
+    if ( ssimu.spindle_set_speed == 0 )
+        return;
+
+    ssimu.spindle_crt_speed = 0;
+    ssimu.spindle_set_speed = 0;
+
+    if ( (ssimu.evmask & FE_EV_SPINDLE_JAM) &&
+         ((ssimu.events & FE_EV_SPINDLE_JAM) == 0 ) )
+        ssimu.flag = true;                  // if event mask was active - set the flag
+    ssimu.events |= FE_EV_SPINDLE_JAM;
+}
+
+
+bool HW_FrontEnd_Event(void)
+{
+    return ssimu.flag;
+}
+
+void mainw::HW_wrp_front_end_simu()
+{
+    uint32 sstat = 0;
+
+    // Set up events
+    sstat |= ui->cb_fe_x->isChecked() ? FE_TOUCH_AXIS_X : 0;
+    sstat |= ui->cb_fe_y->isChecked() ? FE_TOUCH_AXIS_Y : 0;
+    sstat |= ui->cb_fe_z->isChecked() ? FE_TOUCH_AXIS_Z : 0;
+    sstat |= ui->cb_fe_a->isChecked() ? FE_TOUCH_AXIS_A : 0;
+    sstat |= ui->cb_fe_p->isChecked() ? FE_TOUCH_PROBE : 0;
+    // check for endpoints
+    if ( ((sstat & (FE_TOUCH_AXIS_X | FE_TOUCH_AXIS_Y | FE_TOUCH_AXIS_Z)) & ssimu.sensor_status) ^ (sstat & (FE_TOUCH_AXIS_X | FE_TOUCH_AXIS_Y | FE_TOUCH_AXIS_Z)) )
+    {
+        if ( (ssimu.evmask & FE_EV_ENDPOINT) &&
+             ((ssimu.events & FE_EV_ENDPOINT) == 0 ) )
+            ssimu.flag = true;                  // if event mask was active - set the flag
+        ssimu.events |= FE_EV_ENDPOINT;
+    }
+    // check for a axis
+    if ( ((sstat & FE_TOUCH_AXIS_A) & ssimu.sensor_status) ^ (sstat & FE_TOUCH_AXIS_A) )
+    {
+        if ( (ssimu.evmask & FE_EV_A_AXIS) &&
+             ((ssimu.events & FE_EV_A_AXIS) == 0 ) )
+            ssimu.flag = true;                  // if event mask was active - set the flag
+        ssimu.events |= FE_EV_A_AXIS;
+    }
+    // check for probe
+    if ( ((sstat & FE_TOUCH_PROBE) & ssimu.sensor_status) ^ (sstat & FE_TOUCH_PROBE) )
+    {
+        if ( (ssimu.evmask & FE_EV_PROBE) &&
+             ((ssimu.events & FE_EV_PROBE) == 0 ) )
+            ssimu.flag = true;                  // if event mask was active - set the flag
+        ssimu.events |= FE_EV_PROBE;
+    }
+    ssimu.sensor_status = sstat;
+
+    // simulate spindle setup
+    if ( ssimu.spindle_crt_speed != ssimu.spindle_set_speed )
+    {
+        static int subdiv = 0;
+        if (subdiv >= 4)
+        {
+            if ( ssimu.spindle_crt_speed < ssimu.spindle_set_speed )
+                ssimu.spindle_crt_speed++;
+            else
+                ssimu.spindle_crt_speed--;
+            if ( ssimu.spindle_crt_speed == ssimu.spindle_set_speed )
+            {
+                if ( ((ssimu.events & FE_EV_SPINDLE_OK) == 0) && (ssimu.evmask & FE_EV_SPINDLE_OK ) )
+                    ssimu.flag = true;
+                ssimu.events |= FE_EV_SPINDLE_OK;
+            }
+            subdiv = 0;
+        }
+        else
+            subdiv++;
+    }
+
+
+    if ( (ssimu.cmd_in_run == 0) || (ssimu.cmd_finished) )
+        return;
+
+    ssimu.poll_ctr++;
+
+    // make message delay simulation
+    if ( ssimu.resp_time )
+        ssimu.resp_time--;
+    else
+    {
+        ssimu.cmd_finished = true;
+        switch ( ssimu.cmd_in_run )
+        {
+            case SSIMU_CMD_SPINDLE_PWR:
+                ui->cb_fe_pwr->setChecked( ssimu.spindle_on );
+                ssimu.resp_data[0] = 0x50;  // acknowledge
+                ssimu.resp_len = 1;
+                break;
+            case SSIMU_CMD_GET_EVENTS:
+                ssimu.resp_data[0] = 0x53;
+                ssimu.resp_data[1] = ssimu.events;
+                ssimu.resp_data[2] = ssimu.sensor_status;
+                ssimu.resp_len = 3;
+                ssimu.events  &= ~( FE_EV_PROBE | FE_EV_ENDPOINT | FE_EV_A_AXIS | FE_EV_SPINDLE_OK );
+                ssimu.flag = 0;
+                break;
+            case SSIMU_CMD_SET_EVMASK:
+                ssimu.resp_data[0] = 0x50;  // acknowledge
+                ssimu.resp_len = 1;
+                break;
+            case SSIMU_CMD_SET_SPEED:
+                ssimu.events  &= ~( FE_EV_SPINDLE_JAM | FE_EV_SPINDLE_OK );
+                ssimu.resp_data[0] = 0x50;  // acknowledge
+                ssimu.resp_len = 1;
+                break;
+            case SSIMU_CMD_GET_RPM:
+                {
+                    uint32 rpm = ssimu.spindle_crt_speed;
+                    // rpm -> interval:   rps = rpm / 60,  ivs = 1/rps,  ivs4us = ivs * 250kHz =>  ivs4us =250kHz * 60 / rpm
+                    if ( rpm )
+                        rpm = 250000*60 / rpm;
+
+                    ssimu.resp_data[0] = 0x53;
+                    ssimu.resp_data[1] = (uint8)(rpm & 0xff);
+                    ssimu.resp_data[2] = (uint8)(rpm >> 8) & 0xff;
+                    ssimu.resp_len = 3;
+                }
+                break;
+            case SSIMU_CMD_GET_COORD:
+                {
+                    struct SStepCoordinates coords;
+                    uint8 sign[3];
+                    uint8 i;
+
+                    coords.coord[0] = hw_coords.coord[COORD_X];
+                    coords.coord[1] = hw_coords.coord[COORD_Y];
+                    coords.coord[2] = hw_coords.coord[COORD_Z];
+                    for ( i=0; i<3; i++ )
+                    {
+                        if ( coords.coord[i] < 0 )
+                        {
+                            sign[i] = 1;
+                            coords.coord[i] = 0 - coords.coord[i];
+                        }
+                        else
+                            sign[i] = 0;
+                    }
+
+                    i=0;
+                    ssimu.resp_data[i++] = 0x59;
+                    // X:  [xxxx xxxx][xxxx xxxx][xxxx 0000]    high bit to low bit
+                    ssimu.resp_data[i++] = ((coords.coord[0] >> 12) & 0xff);
+                    ssimu.resp_data[i++] = ((coords.coord[0] >> 4)  & 0xff);
+                    // Y:  [0000 yyyy][yyyy yyyy][yyyy yyyy]
+                    ssimu.resp_data[i++] = ((coords.coord[0] << 4)  & 0xf0) | ((coords.coord[1] >> 16) & 0x0f);
+                    ssimu.resp_data[i++] = ((coords.coord[1] >> 8) & 0xff);
+                    ssimu.resp_data[i++] = ((coords.coord[1] >> 0) & 0xff);
+                    // Z:  [zzzz zzzz][zzzz zzzz][zzzz 0sss]
+                    ssimu.resp_data[i++] = ((coords.coord[2] >> 12) & 0xff);
+                    ssimu.resp_data[i++] = ((coords.coord[2] >> 4)  & 0xff);
+                    ssimu.resp_data[i] =   ((coords.coord[2] << 4)  & 0xf0);
+
+                    if ( sign[0] )
+                        ssimu.resp_data[i] |= 0x04;
+                    if ( sign[1] )
+                        ssimu.resp_data[i] |= 0x02;
+                    if ( sign[2] )
+                        ssimu.resp_data[i] |= 0x01;
+
+                    ssimu.resp_len = 9;
+                }
+                break;
+            case SSIMU_CMD_RESET_COORD:
+                ssimu.resp_data[0] = 0x50;  // acknowledge
+                ssimu.resp_len = 1;
+
+                hw_coords.coord[COORD_X] = SIMU_DEFAULT_X;
+                hw_coords.coord[COORD_Y] = SIMU_DEFAULT_Y;
+                hw_coords.coord[COORD_Z] = SIMU_DEFAULT_Z;
+                dispsim_add_point();
+                break;
+        }
+    }
+}
+
+
+
+void fesimu_cmd_set_spindle_pwr(int val)
+{
+    ssimu.cmd_in_run = SSIMU_CMD_SPINDLE_PWR;
+    ssimu.resp_time = 4 + 1;
+    ssimu.poll_ctr = 0;
+    if ( val & 0x40 )
+        ssimu.spindle_on = true;
+    if ( val & 0x04 )
+        ssimu.spindle_on = false;
+}
+
+void fesimu_cmd_get_events(void)
+{
+    ssimu.cmd_in_run = SSIMU_CMD_GET_EVENTS;
+    ssimu.resp_time = 2 + 4;
+    ssimu.poll_ctr = 0;
+}
+
+void fesimu_cmd_set_evmask(int val)
+{
+    ssimu.cmd_in_run = SSIMU_CMD_SET_EVMASK;
+    ssimu.resp_time = 4 + 1;
+    ssimu.poll_ctr = 0;
+    ssimu.evmask = val;
+}
+
+void fesimu_cmd_set_spindle_speed(int val)
+{
+    ssimu.cmd_in_run = SSIMU_CMD_SET_SPEED;
+    ssimu.resp_time = 4 + 1;
+    ssimu.poll_ctr = 0;
+    ssimu.spindle_set_speed = val << 8;
+}
+
+void fesimu_cmd_get_rpm(void)
+{
+    ssimu.cmd_in_run = SSIMU_CMD_GET_RPM;
+    ssimu.resp_time = 3 + 4;
+    ssimu.poll_ctr = 0;
+}
+
+void fesimu_cmd_get_coord(void)
+{
+    ssimu.cmd_in_run = SSIMU_CMD_GET_COORD;
+    ssimu.resp_time = 2 + 10;
+    ssimu.poll_ctr = 0;
+}
+
+void fesimu_cmd_reset_coord(void)
+{
+    ssimu.cmd_in_run = SSIMU_CMD_RESET_COORD;
+    ssimu.resp_time = 3 + 1;
+    ssimu.poll_ctr = 0;
+}
+
+
 uint32 commfe_init()
 {
-
+    memset( &ssimu, 0, sizeof(ssimu));
     return 0;
 }
 
-uint32 commfe_sendCommand( uint8 *fecmd, uint32 cmd_len, uint32 ret_len )
+uint32 commfe_sendCommand( uint8 *fecmd, uint32 cmd_len )
 {
+    if ( pClass->HW_wrp_fe_broken_link() )
+        return 0;
+
+    if ( (memcmp( fecmd, cmd_spindle, 2) == 0) && (cmd_len == 3) )
+        fesimu_cmd_set_spindle_pwr( fecmd[2] );
+    else if ( (memcmp( fecmd, cmd_getevents, 2) == 0) && (cmd_len == 2) )
+        fesimu_cmd_get_events();
+    else if ( (memcmp( fecmd, cmd_setevmask, 2) == 0) && (cmd_len == 3) )
+        fesimu_cmd_set_evmask( fecmd[2] );
+    else if ( (memcmp( fecmd, cmd_setspeed, 2) == 0) && (cmd_len == 3) )
+        fesimu_cmd_set_spindle_speed( fecmd[2] );
+    else if ( (memcmp( fecmd, cmd_getrpm, 2) == 0) && (cmd_len == 2) )
+        fesimu_cmd_get_rpm();
+    else if ( (memcmp( fecmd, cmd_getcoord, 2) == 0) && (cmd_len == 2) )
+        fesimu_cmd_get_coord();
+    else if ( (memcmp( fecmd, cmd_resetcoord, 2) == 0) && (cmd_len == 2) )
+        fesimu_cmd_reset_coord();
 
     return 0;
 }
 
-uint32 commfe_sendCommand_waitResponse( uint8 *fecmd, uint32 cmd_len, uint32 ret_len )
+uint32 commfe_checkResponse( uint8 resp_len )
 {
+    if ( ssimu.cmd_finished == false )
+        return COMMFE_PENDING;
 
+    ssimu.cmd_finished = false;
+    ssimu.cmd_in_run = false;
+
+    if ( resp_len != ssimu.resp_len )
+        return COMMFE_PENDING;
+
+    return COMMFE_OK;
+}
+
+uint32 commfe_getResponse( uint8 *fecmd, uint32 resp_len )
+{
+    if ( ssimu.resp_len == 0 )
+        return 1;
+
+    memcpy( fecmd, ssimu.resp_data, resp_len );
+    resp_len = 0;
     return 0;
 }
 
+uint32 commfe_flushResponse( void )
+{
+    ssimu.resp_len = 0;
+    return 0;
+}
 
+uint32 commfe_is_outfifo_empty( void )
+{
+    if ( ssimu.cmd_in_run && (ssimu.poll_ctr >= 2) )
+        return 1;
+    return 0;
+}
 
 
 /////////////////////////////////////////////////////
@@ -681,6 +1017,9 @@ void mainw::Disp_Redraw( bool redrw_ui )
 
             accel.dirty = false;
         }
+
+        ui->cb_fe_event_flag->setChecked( ssimu.flag );
+        ui->nm_fe_spindle->setValue( ssimu.spindle_crt_speed );
     }
 
 }

@@ -497,7 +497,7 @@
    <widget class="QGroupBox" name="groupBox_2">
     <property name="geometry">
      <rect>
-      <x>1130</x>
+      <x>910</x>
       <y>480</y>
       <width>201</width>
       <height>121</height>
@@ -913,7 +913,7 @@
    <widget class="QGroupBox" name="groupBox_5">
     <property name="geometry">
      <rect>
-      <x>909</x>
+      <x>1110</x>
       <y>480</y>
       <width>221</width>
       <height>121</height>
@@ -925,10 +925,10 @@
     <widget class="QLabel" name="label_11">
      <property name="geometry">
       <rect>
-       <x>20</x>
-       <y>35</y>
+       <x>40</x>
+       <y>22</y>
        <width>46</width>
-       <height>10</height>
+       <height>13</height>
       </rect>
      </property>
      <property name="text">
@@ -938,8 +938,8 @@
     <widget class="QSpinBox" name="nm_fe_spindle">
      <property name="geometry">
       <rect>
-       <x>60</x>
-       <y>30</y>
+       <x>80</x>
+       <y>20</y>
        <width>51</width>
        <height>20</height>
       </rect>
@@ -955,6 +955,139 @@
      </property>
      <property name="maximum">
       <number>30000</number>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_fe_x">
+     <property name="geometry">
+      <rect>
+       <x>140</x>
+       <y>60</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>X</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_fe_y">
+     <property name="geometry">
+      <rect>
+       <x>140</x>
+       <y>80</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Y</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_fe_z">
+     <property name="geometry">
+      <rect>
+       <x>140</x>
+       <y>100</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Z</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_fe_a">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>70</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>A</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_fe_p">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>90</y>
+       <width>70</width>
+       <height>17</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>P</string>
+     </property>
+    </widget>
+    <widget class="QLabel" name="label_6">
+     <property name="geometry">
+      <rect>
+       <x>120</x>
+       <y>47</y>
+       <width>46</width>
+       <height>13</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>sensors:</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pb_fe_break_link">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>50</y>
+       <width>75</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Break link</string>
+     </property>
+     <property name="checkable">
+      <bool>true</bool>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_fe_pwr">
+     <property name="geometry">
+      <rect>
+       <x>140</x>
+       <y>20</y>
+       <width>71</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>power</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="cb_fe_event_flag">
+     <property name="geometry">
+      <rect>
+       <x>39</x>
+       <y>96</y>
+       <width>70</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>event flag</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pb_fe_spindle_jam">
+     <property name="geometry">
+      <rect>
+       <x>30</x>
+       <y>70</y>
+       <width>75</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Spindle jam</string>
      </property>
     </widget>
    </widget>
