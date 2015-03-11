@@ -925,6 +925,11 @@ void mainw::dispsim_mem_clean()
 void mainw::dispsim_add_point()
 {
     uint32 mempoz;
+
+    if ( (hw_coords.coord[COORD_X] > 130*400) || (hw_coords.coord[COORD_X]<0) ||
+         (hw_coords.coord[COORD_Y] > 46*400) || (hw_coords.coord[COORD_Y]<0) )
+        return;
+
     mempoz = 3 * ( (hw_coords.coord[COORD_X] / 40) + (460 - hw_coords.coord[COORD_Y] / 40) * DISPSIM_MAX_W );
     if ( (mempoz + 2) >= DISPSIM_MAX_W * DISPSIM_MAX_H *3 )
         return;
@@ -944,7 +949,9 @@ void mainw::Disp_Redraw( bool redrw_ui )
     G_item_xy  = new QGraphicsPixmapItem( QPixmap::fromImage( image ));
     scene_xy->addItem(G_item_xy);
 
-    pointer_z->setPos( 0, 460 - hw_coords.coord[COORD_Z] * 460 / ( 80 * 400 ) );
+    if ( (hw_coords.coord[COORD_Z]>=0) && (hw_coords.coord[COORD_Z]<=80*400) )
+        pointer_z->setPos( 0, 460 - hw_coords.coord[COORD_Z] * 460 / ( 80 * 400 ) );
+
     pointer_xy->setPos( hw_coords.coord[COORD_X] / 40 , 460 - hw_coords.coord[COORD_Y] / 40 );
     pointer_xy->setZValue(1);
 
