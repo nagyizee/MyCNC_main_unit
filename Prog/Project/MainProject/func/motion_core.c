@@ -247,6 +247,7 @@ static inline void local_isr_recalculate_speeds( void )
                 isr.crt_action.p.Stp_crt[i] = isr.crt_action.p.Stp_ct[i];
                 isr.op.ctr_speed64[i] = (uint64)isr.crt_action.p.Stp_ct[i] << 32LL;
             }
+            isr.request = isrur_set_ct_pwr;
             return;
         }
         accsens = isr.crt_action.p.accsens & 0x01;      // direction for start phase
@@ -263,7 +264,10 @@ static inline void local_isr_recalculate_speeds( void )
     {
         StepDBG_Accelerations( 1, 0 );
         if (isr.op.D[isr.crt_action.ax_max_dist] >= isr.crt_action.p.accdec[1])   // and deceleration point is reached
+        {
             isr.state = MCISR_STATUS_RDOWN;
+            isr.request = isrur_set_end_pwr;
+        }
         return;
     }
 
@@ -307,24 +311,50 @@ static void local_isr_set_directions( uint32 dir )
 }
 
 
-static void local_isr_peek_next_action( void )
+static void local_isr_fetch_new_action( void )
 {
-    int i;
-    isr.crt_action = isr.next_action;       // copy the action struct
-    isr.next_action.channel_active = 0;     // mark the user level action struct as free
+    if ( isr.request_on_hold )      // do not execute anything till user level didn't fulfilled the previous request
+        return;
 
-    StepDBG_LineSegment( &isr.crt_poz, &isr.crt_action.p.dest_poz, isr.crt_action.seq_id );
-
-    memset( &isr.op, 0, sizeof(isr.op) );
-
-    isr.state = MCISR_STATUS_RUP;
-    for (i=0; i<CNC_MAX_COORDS; i++)
+    if ( isr.stepper_fifo.stp[ isr.stepper_fifo.r ].seqType != SEQ_TYPE_GOTO )
     {
-        isr.op.ctr_speed64[i] = ((uint64)isr.crt_action.p.Stp_crt[i]) << 32LL;
+        // notify user level about external inband operation
+        isr.request = isrur_execute_inband;
+        isr.request_on_hold = true;                 // prevent re-dispatching the request
+        return;
     }
+    else
+    {
+        int i;
+        struct SMFEL_Goto *elem;
 
-    // set up motor directions
-    local_isr_set_directions( isr.crt_action.dir_mask );
+        // set it up as a current action
+        elem = &isr.stepper_fifo.stp[ isr.stepper_fifo.r ].params.go_to;
+        isr.crt_action = elem->act;             // copy the action struct (less overhead than using pointers)
+        elem->act.channel_active = 0;       // mark that this element is running
+
+        // set up power level
+        for (i=0; i<CNC_MAX_COORDS; i++)
+        {
+            if ( core.status.pwr[i].set_pwr == mpwr_auto )
+            {
+                HW_SetPower( i, elem->pwr[i].pwr_start );
+            }
+        }
+        isr.request = isrur_set_start_pwr;
+
+        StepDBG_LineSegment( &isr.crt_poz, &isr.crt_action.p.dest_poz, isr.stepper_fifo.stp[ isr.stepper_fifo.r ].seqID );
+        memset( &isr.op, 0, sizeof(isr.op) );
+
+        isr.state = MCISR_STATUS_RUP;
+        for (i=0; i<CNC_MAX_COORDS; i++)
+        {
+            isr.op.ctr_speed64[i] = ((uint64)isr.crt_action.p.Stp_crt[i]) << 32LL;
+        }
+
+        // set up motor directions
+        local_isr_set_directions( isr.crt_action.dir_mask );
+    }
 }
 
 
@@ -361,18 +391,25 @@ void StepTimerIntrHandler (void)
             {
                 isr.state = MCISR_STATUS_IDLE;
                 StepDBG_SegmentFinished();
-                if ( isr.next_action.channel_active )
-                    local_isr_peek_next_action();
-            }
 
+                // release element
+                isr.stepper_fifo.r++;
+                if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
+                    isr.stepper_fifo.r = 0;
+                isr.stepper_fifo.c--;
+
+                // check for the next
+                if ( isr.stepper_fifo.c )
+                    local_isr_fetch_new_action();
+            }
             n--;
         }
     }
     else
     {   
         // check if there is a new action
-        if ( isr.next_action.channel_active )
-            local_isr_peek_next_action();
+        if ( isr.stepper_fifo.c )
+            local_isr_fetch_new_action();
         // check if clock pulse should be deactivated
         if ( isr.ckmask )
         {
@@ -384,7 +421,8 @@ void StepTimerIntrHandler (void)
             }
         }
     }
-    
+
+    // timing signals
     ISR_counter_1++;
     if ( ISR_counter_1 == SYSTEM_T_100US_COUNT )
     {
@@ -420,29 +458,8 @@ void    stepper_get_coord( struct SStepCoordinates *coord )
     __enable_interrupt();
 }
 
-int     stepper_add_action( struct SMotionCoreISRaction *action )
-{
-    if ( isr.next_action.channel_active )
-        return -1;
 
-    __disable_interrupt();
-    isr.next_action = *action;
-    __enable_interrupt();
-    return 0;
-}
-
-#define stepper_check_action_busy()     ( isr.crt_action.channel_active )       // do not do double buffering - check always the current action
-
-#define stepper_check_in_progress()     ( isr.next_action.channel_active || isr.crt_action.channel_active )     // stepper ISR busy - running a current one + having a next one
-
-void    stepper_stop_and_clear()
-{
-    __disable_interrupt();
-    isr.state = MCISR_STATUS_IDLE;
-    isr.next_action.channel_active = 0;
-    isr.crt_action.channel_active = 0;
-    __enable_interrupt();
-}
+#define stepper_check_in_progress()     ( isr.stepper_fifo.c )                  // stepper ISR is running a sequence
 
 void    stepper_insert_step( uint32 coords, uint32 dirmask )
 {
@@ -480,7 +497,10 @@ void stepper_stop()
 {
     __disable_interrupt();
     isr.crt_action.channel_active = 0;
-    isr.next_action.channel_active = 0;
+    isr.stepper_fifo.c = 0;
+    isr.stepper_fifo.w = isr.stepper_fifo.r;        // preserve read pointer to be able to retreive the last executed sequence
+    isr.request = 0;
+    isr.request_on_hold = false;
     __enable_interrupt();
 }
 
@@ -502,6 +522,48 @@ void stepper_scale_factor( int32 factor )
     isr.sf_ctr = 0;
     isr.sf_val = inc_val;
     __enable_interrupt();
+}
+
+
+int stepper_confirm_inband(void)
+{
+    if ( isr.request_on_hold == false )
+        return -1;
+    __disable_interrupt();
+    // advance to the next element
+    isr.stepper_fifo.r++;
+    if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
+        isr.stepper_fifo.r = 0;
+    isr.stepper_fifo.c--;
+    // unblock the sequence fetcher
+    isr.request_on_hold = false;
+    __enable_interrupt();
+    return 0;
+}
+
+struct SStepFifoElement *stepper_get_request(uint32 *val)
+{
+    // !!! Precaution - this returs the pointer with the element currently in run - it may change meantime - so 
+    // use it only for the current isr.request in a single loop. (postponing can overwrite it's content)
+    struct SStepFifoElement *elem;
+    __disable_interrupt();
+    *val = (uint32)isr.request;
+    isr.request = 0;
+    elem = &isr.stepper_fifo.stp[isr.stepper_fifo.r];
+    __enable_interrupt();
+    return elem;
+}
+
+
+struct SStepFifoElement *stepper_get_current_in_run(void)
+{
+    // !!! Precaution - this returs the pointer with the element currently in run - it may change meantime - so 
+    // use it only for the current isr.request in a single loop. (postponing can overwrite it's content)
+    struct SStepFifoElement *elem;
+    __disable_interrupt();
+    elem = &isr.stepper_fifo.stp[isr.stepper_fifo.r];
+    __enable_interrupt();
+    return elem;
 }
 
 
@@ -597,75 +659,35 @@ static inline int internal_sequence_fifo_fullness( void )
 
 static struct SStepFifoElement *internal_step_fifo_get_fill_pointer( void )
 {
-    if ( core.stepper_fifo.c >= MAX_STEP_FIFO )
+    if ( isr.stepper_fifo.c >= MAX_STEP_FIFO )              // atomic op., can be used w/o mutex
         return NULL;
-    return &core.stepper_fifo.stp[ core.stepper_fifo.w ];
+    return &isr.stepper_fifo.stp[ isr.stepper_fifo.w ]; // write pointer is operated by user level - no need for mutex
 }
 
 
 static int internal_step_fifo_insert( struct SStepFifoElement *stp )
 {
-    if ( core.stepper_fifo.c >= MAX_STEP_FIFO )
+    if ( isr.stepper_fifo.c >= MAX_STEP_FIFO )
         return -1;
 
     if ( stp != NULL )
-        core.stepper_fifo.stp[ core.stepper_fifo.w ] = *stp;
+        isr.stepper_fifo.stp[ isr.stepper_fifo.w ] = *stp;
 
-    core.stepper_fifo.w++;
+    isr.stepper_fifo.w++;                                   // write pointer is operated by user level - no need for mutex
 
-    if ( core.stepper_fifo.w == MAX_STEP_FIFO )
-        core.stepper_fifo.w = 0;
-    core.stepper_fifo.c++;
+    if ( isr.stepper_fifo.w == MAX_STEP_FIFO )
+        isr.stepper_fifo.w = 0;
+
+    __disable_interrupt();
+    isr.stepper_fifo.c++;
+    __enable_interrupt();
+
     return 0;
 }
-
-
-static int internal_step_fifo_get( struct SStepFifoElement *stp )
-{
-    if ( core.stepper_fifo.c == 0 )
-        return -1;
-
-    *stp = core.stepper_fifo.stp[ core.stepper_fifo.r++ ];
-
-    if ( core.stepper_fifo.r == MAX_STEP_FIFO )
-        core.stepper_fifo.r = 0;
-    core.stepper_fifo.c--;
-    return 0;
-}
-
-
-static int internal_step_fifo_peek( struct SStepFifoElement **stp, bool next )
-{
-    int idx;
-
-    *stp = NULL;
-    if ( (core.stepper_fifo.c == 0) || ( next && (core.stepper_fifo.c == 1)) )
-        return -1;
-
-    idx = core.stepper_fifo.r;
-    if ( next )
-    {
-        idx++;
-        if ( idx == MAX_STEP_FIFO )
-            idx = 0;
-    }
-
-    *stp = &core.stepper_fifo.stp[ idx ];
-    return 0;
-}
-
-
-static void internal_step_fifo_flush( void )
-{
-    core.stepper_fifo.c = 0;
-    core.stepper_fifo.w = 0;
-    core.stepper_fifo.r = 0;
-}
-
 
 static inline int internal_step_fifo_fullness( void )
 {
-    return core.stepper_fifo.c;
+    return isr.stepper_fifo.c;
 }
 
 
@@ -756,7 +778,7 @@ static uint32 internal_calculate_acc_dist_fp16( uint32 v1, uint32 v2 )
 }
 
 
-static inline int internal_calculate_accdec_distances( struct SStepFifoElement *fseq, 
+static inline int internal_calculate_accdec_distances( struct SStepFifoElement *fstep, 
                                                        uint64 L, 
                                                        uint32 *dists,
                                                        uint32 startspeed,
@@ -781,11 +803,11 @@ static inline int internal_calculate_accdec_distances( struct SStepFifoElement *
     i2 = 0;
 
     // calculate start acceleration
-    fseq->params.go_to.p.accsens = 0;
+    fstep->params.go_to.act.p.accsens = 0;
     if ( startspeed < stepspeed )
     {
         i1 = internal_calculate_acc_dist_fp16( startspeed, stepspeed );
-        fseq->params.go_to.p.accsens |= 0x01;   // bit 0 - set to '1' - means it accelerate (positive acceleration)
+        fstep->params.go_to.act.p.accsens |= 0x01;   // bit 0 - set to '1' - means it accelerate (positive acceleration)
     }
     else if ( startspeed > stepspeed )
         i1 = internal_calculate_acc_dist_fp16( stepspeed, startspeed );
@@ -794,7 +816,7 @@ static inline int internal_calculate_accdec_distances( struct SStepFifoElement *
     if ( stepspeed < endspeed )
     {
         i2 = internal_calculate_acc_dist_fp16( stepspeed, endspeed );
-        fseq->params.go_to.p.accsens |= 0x02;   // bit 1 - set to '1' - means it accelerate (positive acceleration)
+        fstep->params.go_to.act.p.accsens |= 0x02;   // bit 1 - set to '1' - means it accelerate (positive acceleration)
     }
     else if ( stepspeed > endspeed )
         i2 = internal_calculate_acc_dist_fp16( endspeed, stepspeed );
@@ -804,7 +826,7 @@ static inline int internal_calculate_accdec_distances( struct SStepFifoElement *
     D_i1 = (int64)( (uint64)i1 << (FPlen - FP16) );
 
     // for the same acceleration direction
-    if ( (fseq->params.go_to.p.accsens == 0x01) || (fseq->params.go_to.p.accsens == 0x02) ) // sign differs - accelerate/decelerate
+    if ( (fstep->params.go_to.act.p.accsens == 0x01) || (fstep->params.go_to.act.p.accsens == 0x02) ) // sign differs - accelerate/decelerate
     {
         if ( D_i1 > D_i2 )
         {
@@ -819,11 +841,11 @@ static inline int internal_calculate_accdec_distances( struct SStepFifoElement *
     // transpose i1, i2 to distance on the longest axis
     // axdist = D_ix * dax / L          - 37bit + 18bit = 55bit - can add 9 bits for precision, 
     // to obtain fp32 on distance we will add 9 bits by downshift L, and 14 bits by shifting the result:  9 + 9 + 14 -> 32 bit
-    fseq->params.go_to.p.accdec[0] = ( ( ((uint64)D_i1 * (dists[fseq->params.go_to.ax_max_dist] << 9)) / ( L >> 9 ) ) << 14 );
+    fstep->params.go_to.act.p.accdec[0] = ( ( ((uint64)D_i1 * (dists[fstep->params.go_to.act.ax_max_dist] << 9)) / ( L >> 9 ) ) << 14 );
     if ( D_i1 == D_i2 )
-        fseq->params.go_to.p.accdec[1] = fseq->params.go_to.p.accdec[0];
+        fstep->params.go_to.act.p.accdec[1] = fstep->params.go_to.act.p.accdec[0];
     else
-        fseq->params.go_to.p.accdec[1] = ( ( ((uint64)D_i2 * (dists[fseq->params.go_to.ax_max_dist] << 9)) / ( L >> 9 ) ) << 14 );
+        fstep->params.go_to.act.p.accdec[1] = ( ( ((uint64)D_i2 * (dists[fstep->params.go_to.act.ax_max_dist] << 9)) / ( L >> 9 ) ) << 14 );
     return 0;
 }
 
@@ -1016,17 +1038,17 @@ static void internal_calculate_power_levels( struct SStepFifoElement *pstep )
         uint32 pwr_end;
 
         // power for constant ramp
-        if ( pstep->params.go_to.p.Stp_ct[i] > STEPPWR_HIGH )
+        if ( pstep->params.go_to.act.p.Stp_ct[i] > STEPPWR_HIGH )
             pwr_ct = mpwr_full;
-        else if ( pstep->params.go_to.p.Stp_ct[i] >= STEPPWR_MED )
+        else if ( pstep->params.go_to.act.p.Stp_ct[i] >= STEPPWR_MED )
             pwr_ct = mpwr_high;
-        else if ( pstep->params.go_to.p.Stp_ct[i] >= STEPPWR_LOW )
+        else if ( pstep->params.go_to.act.p.Stp_ct[i] >= STEPPWR_LOW )
             pwr_ct = mpwr_med;
         else
             pwr_ct = mpwr_low;
 
         // power for start acceleration
-        if ( pstep->params.go_to.p.Stp_ct[i] == pstep->params.go_to.p.Stp_crt[i] )
+        if ( pstep->params.go_to.act.p.Stp_ct[i] == pstep->params.go_to.act.p.Stp_crt[i] )
         {
             pwr_bgn = pwr_ct;
         }
@@ -1038,7 +1060,7 @@ static void internal_calculate_power_levels( struct SStepFifoElement *pstep )
         }
 
         // power for end acceleration - hardcode to maximum - needed for emergency stop
-        if ( pstep->params.go_to.p.Stp_ct[i] )
+        if ( pstep->params.go_to.act.p.Stp_ct[i] )
         {
             pwr_end = pwr_ct + 2;
             if ( pwr_end > mpwr_full )
@@ -1077,26 +1099,26 @@ static int internal_sequence_precalculate( struct SMotionSequence *crt_seq, stru
                                                        crt_seq->params.go_to.coord.coord[i],
                                                        &dists[i] ) << i );
     }
-    pstep->params.go_to.dir_mask = (uint8)dirmask;
-    pstep->params.go_to.p.dest_poz = crt_seq->params.go_to.coord;
+    pstep->params.go_to.act.dir_mask = (uint8)dirmask;
+    pstep->params.go_to.act.p.dest_poz = crt_seq->params.go_to.coord;
 
     // Calculate the total distances
     // L = sqrt( x*x + y*y + z*z + a*a )
-    pstep->params.go_to.channel_active = 0;
+    pstep->params.go_to.act.channel_active = 0;
     for ( i=0; i<CNC_MAX_COORDS; i++ )
     {
         if ( dists[i] )
         {
-            pstep->params.go_to.channel_active |= ( 1 << i );
+            pstep->params.go_to.act.channel_active |= ( 1 << i );
         }
         if ( maxdist < dists[i] )
         {
             maxdist = dists[i];
-            pstep->params.go_to.ax_max_dist = (uint8)i;
+            pstep->params.go_to.act.ax_max_dist = (uint8)i;
         }
     }
 
-    if ( pstep->params.go_to.channel_active == 0 )
+    if ( pstep->params.go_to.act.channel_active == 0 )
         return -1;
 
     L = internal_calculate_speeds_and_distance( crt_seq, next_seq, &feed_start, &feed_end );
@@ -1122,17 +1144,17 @@ static int internal_sequence_precalculate( struct SMotionSequence *crt_seq, stru
         // Problem is: stpspeedFP32 * dist * (1<<FPlen)  --->   31bit + 18bit + 19bit = 68bit - need to get rid of 4 bits
         // since stepspeed encoding can be done on 27 bit - change the formula:
         // axspeed = (( (stpspeedFP32) * dist ) * ( 1<<(FPlen-4))) / ( L >> 4 )
-        pstep->params.go_to.p.Stp_ct[i] = ( (((uint64)stepspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
+        pstep->params.go_to.act.p.Stp_ct[i] = ( (((uint64)stepspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
 
         if ( startspeed == stepspeed )
-            pstep->params.go_to.p.Stp_crt[i] = pstep->params.go_to.p.Stp_ct[i];
+            pstep->params.go_to.act.p.Stp_crt[i] = pstep->params.go_to.act.p.Stp_ct[i];
         else
-            pstep->params.go_to.p.Stp_crt[i] = ( (((uint64)startspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
+            pstep->params.go_to.act.p.Stp_crt[i] = ( (((uint64)startspeed) << (FPlen-4)) * dists[i] ) / ( L >> 4 ); 
 
         // Acc[i] = Dist[i] * ACCFACTOR / totalDist  + 10bit shift to have FP42
         // To get acceleration in FP42 must shift with 10 bit additional.   nominator bit count: 16 + 10 + 19 + 18 = 63;    the (16+10) + 16 gives the fp42
         // max error: 5steps / 500mm
-        pstep->params.go_to.p.Acc[i] = ( (((uint64)ACC_FACTOR_FP32) << (FPlen+10)) * dists[i] ) / L;
+        pstep->params.go_to.act.p.Acc[i] = ( (((uint64)ACC_FACTOR_FP32) << (FPlen+10)) * dists[i] ) / L;
     }
 
     internal_calculate_power_levels( pstep );
@@ -1195,178 +1217,116 @@ static int internal_step_precalculator( void )
 }
 
 
-static inline void internal_seqpoll_run_goto( struct SStepFifoElement *stp )
+static void internal_idle_power(uint32 delay)
 {
-    struct SMotionCoreISRaction action;
     int i;
-
-    // do not introduce new action till isr didn't finished completely the current one
-    if ( stepper_check_action_busy() )
-        return;
-
-    // set up start power for all axis
+    // if auto power - set up idle power after 20ms. If a new sequence is pushed in, it will override this
     for (i=0; i<CNC_MAX_COORDS; i++)
     {
         if ( core.status.pwr[i].set_pwr == mpwr_auto )
         {
-            internal_pwr_set_axis_power(i, stp->params.go_to.pwr[i].pwr_start, 0 );
+            internal_pwr_set_axis_power(i, mpwr_low, delay );
         }
     }
-    core.status.pwr_last_isr_status = MCISR_STATUS_IDLE;
-
-    action.p = stp->params.go_to.p;
-    action.channel_active = stp->params.go_to.channel_active;
-    action.ax_max_dist = stp->params.go_to.ax_max_dist;
-    action.dir_mask = stp->params.go_to.dir_mask;
-    action.seq_id = stp->seqID;
-
-    stepper_add_action( &action );
-
-    core.status.is_running = true;
-    core.status.crt_stp = *stp;
-    return;
 }
-
-static inline void internal_seqpoll_run_hold_time( struct SStepFifoElement *stp )
-{
-    core.status.timeout = stp->params.hold * 100;
-    core.status.is_running = true;
-    core.status.crt_stp = *stp;
-}
-
-static inline void internal_seqpoll_run_spindle_speed( struct SStepFifoElement *stp )
-{
-
-}
-
 
 
 static void internal_sequencer_poll( struct SEventStruct *evt )
 {
     // NOTE: It enters here only for is_started state - no need to check inside
 
-    // if sequence is in run - keep it working
-    if ( core.status.is_running )
+    // check for ISR requests
+    if ( isr.request )  // no mutex needed here - just verifying
     {
-        switch ( core.status.crt_stp.seqType )
+        int i;
+        uint32 req;
+        struct SStepFifoElement *elem;
+
+        elem = stepper_get_request(&req);
+
+        switch ( req )
         {
-            case SEQ_TYPE_GOTO:
-                if ( stepper_check_in_progress() == false )         // stepping action is finished (and no new one initiated)
+            case isrur_set_start_pwr:                   // request for start power setup
+                for (i=0; i<CNC_MAX_COORDS; i++)
                 {
-                    int i;
-                    core.status.is_running = false;
-                    // if auto power - set up idle power after 20ms. If a new sequence is pushed in, it will override this
-                    for (i=0; i<CNC_MAX_COORDS; i++)
-                    {
-                        if ( core.status.pwr[i].set_pwr == mpwr_auto )
-                        {
-                            internal_pwr_set_axis_power(i, mpwr_low, 2 );       // power down after 20ms
-                        }
-                    }
-
-                    // update scale factor to immediate value
-                    core.status.motion.scale_crt = core.status.motion.scale_set;
-                    stepper_scale_factor( core.status.motion.scale_crt );
-                }
-                else                                                // still running
-                {
-                    // update the speed scale factor
-                    if ( evt->timer_tick_10ms && 
-                         (core.status.motion.scale_crt != core.status.motion.scale_set) )
-                    {
-                        if (core.status.motion.scale_crt < core.status.motion.scale_set)
-                        {
-                            core.status.motion.scale_crt +=2; 
-                            if ( core.status.motion.scale_crt > core.status.motion.scale_set )
-                                core.status.motion.scale_crt = core.status.motion.scale_set;
-                        }
-                        else
-                        {
-                            core.status.motion.scale_crt -=2;
-                            if ( core.status.motion.scale_crt < core.status.motion.scale_set )
-                                core.status.motion.scale_crt = core.status.motion.scale_set;
-                        }
-
-                        stepper_scale_factor( core.status.motion.scale_crt );
-                    }
-
-                    // check for power level adjustment
-                    register uint32 isr_status;
-                    isr_status = isr.state;     // this sould be atomic
-                    if ( isr_status != core.status.pwr_last_isr_status )
-                    {
-                        int i;
-                        core.status.pwr_last_isr_status = isr_status;
-                        switch ( isr_status )
-                        {
-                            case MCISR_STATUS_RUP:
-                                for (i=0; i<CNC_MAX_COORDS; i++)
-                                {
-                                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
-                                        internal_pwr_set_axis_power(i, core.status.crt_stp.params.go_to.pwr[i].pwr_start, 0);
-                                }
-                                break;
-                            case MCISR_STATUS_CT:
-                                for (i=0; i<CNC_MAX_COORDS; i++)
-                                {
-                                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
-                                        internal_pwr_set_axis_power(i, core.status.crt_stp.params.go_to.pwr[i].pwr_ct, 0);
-                                }
-                                break;
-                            case MCISR_STATUS_RDOWN:
-                                for (i=0; i<CNC_MAX_COORDS; i++)
-                                {
-                                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
-                                        internal_pwr_set_axis_power(i, core.status.crt_stp.params.go_to.pwr[i].pwr_end, 0);
-                                }
-                                break;
-                        }
-                    }
+                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
+                        internal_pwr_set_axis_power(i, elem->params.go_to.pwr[i].pwr_start, 0);
                 }
                 break;
-            case SEQ_TYPE_HOLD:
-                if ( core.status.timeout )
+            case isrur_set_ct_pwr:
+                for (i=0; i<CNC_MAX_COORDS; i++)        // request for constant power setup
                 {
-                    if ( evt->timer_tick_10ms )
-                        core.status.timeout--;
-                }               
+                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
+                        internal_pwr_set_axis_power(i, elem->params.go_to.pwr[i].pwr_ct, 0);
+                }
+                break;
+            case isrur_set_end_pwr:
+                for (i=0; i<CNC_MAX_COORDS; i++)        // request for end power setup
+                {
+                    if ( core.status.pwr[i].set_pwr == mpwr_auto )
+                        internal_pwr_set_axis_power(i, elem->params.go_to.pwr[i].pwr_end, 0);
+                }
+                break;
+            case isrur_execute_inband:
+                if ( core.status.inband_cb == NULL )
+                {
+                     // no inband callback defined - unlock immediately
+                    stepper_confirm_inband();
+                }
                 else
                 {
-                    core.status.is_running = false;
+                    // call the inband callback
+                    internal_idle_power(100);
+                    core.status.inband_ex = true;
+                    core.status.inband_cb( elem->seqType, elem->params.spindle );       // spindle or hold - same address - because of union
                 }
                 break;
-            case SEQ_TYPE_SPINDLE:
-                break;
         }
     }
-    // if terminated or it isn't running 
-    if ( core.status.is_running == false )
+
+    // check for dynamic stuff if ISR is running a sequence
+    if ( stepper_check_in_progress() )
     {
-        // start the next sequence 
-        struct SStepFifoElement stp;
-        if ( internal_step_fifo_get( &stp ) == 0 )
+        core.status.is_running = true;      // informative only - to detect stopped state to prevent reentry
+
+        // update the speed scale factor
+        if ( evt->timer_tick_10ms && 
+             (core.status.motion.scale_crt != core.status.motion.scale_set) )
         {
-            switch ( stp.seqType )
+            if (core.status.motion.scale_crt < core.status.motion.scale_set)
             {
-                case SEQ_TYPE_GOTO:
-                    internal_seqpoll_run_goto( &stp );
-                    break;
-                case SEQ_TYPE_HOLD:
-                    internal_seqpoll_run_hold_time( &stp );
-                    break;
-                case SEQ_TYPE_SPINDLE:
-                    internal_seqpoll_run_spindle_speed( &stp );
-                    break;
+                core.status.motion.scale_crt +=2; 
+                if ( core.status.motion.scale_crt > core.status.motion.scale_set )
+                    core.status.motion.scale_crt = core.status.motion.scale_set;
             }
-        }
-        else
-        {
-            if ( internal_sequence_fifo_fullness() )
+            else
             {
-                evt->cnc_motion_warn_starving = 1;
+                core.status.motion.scale_crt -=2;
+                if ( core.status.motion.scale_crt < core.status.motion.scale_set )
+                    core.status.motion.scale_crt = core.status.motion.scale_set;
             }
+
+            stepper_scale_factor( core.status.motion.scale_crt );
         }
     }
+    else if ( core.status.is_running )
+    {
+        core.status.is_running = false;     // prevent reentry
+
+        // set power to idle in 20ms
+        internal_idle_power(2);
+
+        // update scale factor to immediate value
+        core.status.motion.scale_crt = core.status.motion.scale_set;
+        stepper_scale_factor( core.status.motion.scale_crt );
+
+        // stepper ISR stopped executing - input fifo has elements, but step fifo is empty
+        if ( internal_sequence_fifo_fullness() )
+        {
+            evt->cnc_motion_warn_starving = 1;
+        }
+    }
+
 }
 
 
@@ -1450,7 +1410,7 @@ void motion_set_max_travel( struct SStepCoordinates *coord )
 
 int motion_step( uint32 axis, uint32 dir )
 {
-    if ( core.status.is_running )
+    if ( core.status.is_started )
         return -1;
 
     while ( isr.ckmask );
@@ -1508,21 +1468,16 @@ void motion_sequence_stop( void )
     // flush all the fifos and the IRQ
     stepper_stop();
     internal_sequence_fifo_flush();
-    internal_step_fifo_flush();
 
     // set up low power for all axis after 100ms
-    for (i=0; i<CNC_MAX_COORDS; i++)
-    {
-        if ( core.status.pwr[i].set_pwr == mpwr_auto )
-        {
-            internal_pwr_set_axis_power(i, mpwr_low, 10);
-        }
-    }
+    internal_idle_power(10);
 
     // reset internal status
     core.status.motion.pcoord_updated = false;
     core.status.motion.next_precalc = false;
     core.status.motion.prev_speed = 0;
+
+    core.status.inband_ex = false;
 
     core.status.motion.scale_crt = core.status.motion.scale_set;
     stepper_scale_factor( core.status.motion.scale_set );
@@ -1535,33 +1490,38 @@ void motion_sequence_stop( void )
 
 uint32 motion_sequence_crt_cmdID( void )
 {
-    if ( core.status.is_running )
-        return core.status.crt_stp.cmdID;
-    else if ( core.status.is_started )
-    {
-        struct SStepFifoElement *stp;
-        if ( internal_step_fifo_peek( &stp, false ) )
-            return CMD_ID_INVALID;
-        return stp->cmdID;
-    }
-    else
-        return core.status.crt_stp.cmdID;
+    struct SStepFifoElement *elem;
+    elem = stepper_get_current_in_run();        // even in stopped state
+    return elem->cmdID;
 }
 
 
 uint32 motion_sequence_crt_seqID( void )
 {
-    if ( core.status.is_running )
-        return core.status.crt_stp.seqID;
-    else if ( core.status.is_started )
+    struct SStepFifoElement *elem;
+    elem = stepper_get_current_in_run();        // even in stopped state
+    return elem->seqID;
+}
+
+
+int motion_sequence_register_callback( motion_sequence_callback func )
+{
+    if ( core.status.is_started )
+        return -1;
+
+    core.status.inband_cb = func;
+    return 0;
+}
+
+
+int motion_sequence_confirm_inband_execution(void)
+{
+    if ( core.status.inband_ex )
     {
-        struct SStepFifoElement *stp;
-        if ( internal_step_fifo_peek( &stp, false ) )
-            return CMD_ID_INVALID;
-        return stp->seqID;
+        core.status.inband_ex = false;
+        return stepper_confirm_inband();
     }
-    else
-        return core.status.crt_stp.seqID;
+    return -1;
 }
 
 

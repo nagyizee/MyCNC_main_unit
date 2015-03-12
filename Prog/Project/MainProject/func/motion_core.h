@@ -80,29 +80,11 @@
 
     // execute a single step on an axis
     // if maximum points are not initted - it will go without boundaries
-    // routine is synchronous - will wait till step fifo is emptied -> can not generate high frequency stepping
+    // routine is synchronous - works only in stopped state
     int motion_step( uint32 axis, uint32 dir );
 
 
-
-    // sets the spindle speed - works only in stopped state
-    // in working state spindle speed is controlled by sequences
-    // 0 - spindle stopped
-    // 0-TBD - spindle speed
-    // Call motion_spindle_is_ok() for busy state
-    void motion_spindle( TSpindleSpeed speed );
-
-    // Scale the spindle speed with +/- factor. Value is 0 - 200.
-    // 0 - no scale, +200 - speed up with x2, -200 - speed down with x2
-    // it applies the factor in progressive way, no need to wait for it
-    void motion_spindle_scale( int factor );
-
-    // returns true when spindle speed is OK
-    bool motion_spindle_is_ok();
-
-
-
-    // insert a motion sequence in the sequence fifo
+   // insert a motion sequence in the sequence fifo
     int motion_sequence_insert( struct SMotionSequence *seq );
 
     // start motion sequence - if queue is empty it will wait for new sequence insertion,
@@ -118,6 +100,17 @@
 
     // get the current sequence ID which is in execution, or the last sequence ID which was interrupted
     uint32 motion_sequence_crt_seqID( void );
+
+
+    // callback prototype for externally executed inband operations 
+    typedef void (*motion_sequence_callback)( uint32 seqType, uint32 value );
+
+    // register a callback function for externally executed inband operations
+    int motion_sequence_register_callback( motion_sequence_callback func );
+
+    // If a callback is received, the upper layer have to do some stuff, till then the sequence execution is on hold.
+    // Call this to deblock the execution, confirming that the upper layer terminated it's part
+    int motion_sequence_confirm_inband_execution(void);
 
 
     // Scale the feed speed with +/- factor. Value is 0 - 500.

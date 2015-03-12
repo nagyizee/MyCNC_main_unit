@@ -21,6 +21,15 @@
         uint32 accsens;                         // bit 0 -> beginning 1-positive 0-negative, bit 1 -> ending 1-positive 0-negative 
     };
 
+    struct SMotionCoreISRaction
+    {
+        struct SMotionCoreActionCommon  p;      // parameters
+
+        uint32 channel_active;                  // Bit 1 means that we have movement on the corresponding coordinate, 0 - if no movement on coordinate.
+                                                //      it is used also to signal the application about finishing the action: if 0 - means that action is finished
+        uint32 ax_max_dist;                     // axis index with maximum distance - acceleration / constant / deceleration points are given on this
+        uint32 dir_mask;                        // direction mask ( 1- plus, 0- minus )
+    };
 
     struct SMotionPowerLevel
     {
@@ -33,13 +42,8 @@
 
     struct SMFEL_Goto                           // struct size = 84 + 4*4 + 4 = 104
     {
-        struct SMotionCoreActionCommon     p;   // parameters
-        struct SMotionPowerLevel           pwr[CNC_MAX_COORDS];
-        
-        uint8 channel_active;                   // Bit 1 means that we have movement on the corresponding coordinate, 0 - if no movement on coordinate
-        uint8 ax_max_dist;                      // axis index with maximum distance - acceleration / constant / deceleration points are given on this
-        uint8 dir_mask;                         // direction mask ( 1- plus, 0- minus )
-        uint8 reserved;
+        struct SMotionCoreISRaction     act;
+        struct SMotionPowerLevel        pwr[CNC_MAX_COORDS];
     };                                          // - total: 44bytes
 
 
@@ -71,9 +75,9 @@
     struct SMotionStepperFifo                           // output fifo for feeding the stepper ISR
     {
         struct SStepFifoElement    stp[MAX_STEP_FIFO];
-        uint8   c;
-        uint8   w;
-        uint8   r;
+        uint32   c;                                     // incremented by user level, decremented by ISR (at completion, not at fetching)
+        uint32   w;                                     // operated by user level
+        uint32   r;                                     // operated from ISR. step element will be held till ISR isn't finished it's execution
     };
 
 
@@ -99,11 +103,12 @@
 
     struct SDriverPower
     {
-        uint8   set_pwr;            // power level set through API - can be automated also - in this case the standby current is set up
-
+        uint32  set_pwr;            // power level set through API - can be automated also - in this case the standby current is set up
+                                    //    - use uint32 since it is read by ISR
         uint8   delay;              // 
         uint8   crt_power;          // power level currently in use
         uint8   is_dirty;           // set by application when setting power level, cleared by power handling module when power level is set up
+        uint8   reserved;
     };
 
 
@@ -112,21 +117,19 @@
         bool is_running;                        // sequencer is running an active sequence ( busy state )
         bool is_started;                        // sequencer is started (may not run anyhting if sequence fifo is empty)
 
-        struct SStepFifoElement  crt_stp;               // sequence currently in run in ISR
         struct SMotionInternals  motion;                // internal status and saved precalculations for generating the next motion
 
         struct SDriverPower      pwr[CNC_MAX_COORDS];   // power settings for axis
         bool                     pwr_check;             // set when need to check power setup completion, cleared when all dirty flags are false
-        uint32                   pwr_last_isr_status;   // last ISR status for power update
 
-        uint32                   timeout;               // timeout in 10ms units used for hold time
+        motion_sequence_callback inband_cb;     // callback for inband execution
+        bool                     inband_ex;     // inband in execution, sequencer is in hold
     };
 
 
     struct SMotionCoreInternals                 // Main core structure
     {
         struct SStepCoordinates     max_travel;     // maximum step number on each axis
-        struct SMotionStepperFifo   stepper_fifo;   // output fifo for the stepper IRQ
         struct SMotionSequenceFifo  sequence_fifo;  // input fifo in the motion core
         struct SMotionStatus        status;         // insternal status of the motion core
     };
@@ -140,18 +143,6 @@
     #define MCISR_STATUS_RDOWN      3       // speed ramp down
 
 
-    struct SMotionCoreISRaction
-    {
-        struct SMotionCoreActionCommon  p;      // parameters
-
-        uint32 channel_active;                  // Bit 1 means that we have movement on the corresponding coordinate, 0 - if no movement on coordinate.
-                                                //      it is used also to signal the application about finishing the action: if 0 - means that action is finished
-        uint32 ax_max_dist;                     // axis index with maximum distance - acceleration / constant / deceleration points are given on this
-        uint32 dir_mask;                        // direction mask ( 1- plus, 0- minus )
-        uint32 seq_id;                          // sequence ID ( identifies the currently working sequence )
-    };
-
-
     struct SMotionCoreISRop
     {
         uint64  D[CNC_MAX_COORDS];              // distance in 32:32fp - the upper part is the step integer part, the lower part is the fractional part
@@ -160,24 +151,36 @@
 
     };
 
+    enum EIRSuserLevelRequest
+    {
+        isrur_none = 0,
+        isrur_set_start_pwr,            // user level should set up start-up power (though ISR set up the hardware, status structures should be updated)
+        isrur_set_ct_pwr,
+        isrur_set_end_pwr,
+        isrur_execute_inband,
+    };
 
     struct SMotionCoreISR
     {
-        uint32  state;                          // see MCISR_STATUS_XXX defines
+        uint32  state;                              // see MCISR_STATUS_XXX defines
 
-        struct SMotionCoreISRaction crt_action; // action passed from user level
-        struct SMotionCoreISRaction next_action;// next movement action to be executed - set up by the user level core code
-        struct SMotionCoreISRop     op;         // operation
+        struct SMotionStepperFifo   stepper_fifo;   // output fifo for the stepper IRQ
 
-        uint32  ckmask;                         // bitmask with channels where clock signal is set
-        uint32  ckoff[CNC_MAX_COORDS];          // clock off timeout
+        struct SMotionCoreISRaction crt_action;     // action passed from user level
+        struct SMotionCoreISRaction next_action;    // next movement action to be executed - set up by the user level core code
+        struct SMotionCoreISRop     op;             // operation
 
-        int32   scale_factor;                   // speed scale factor in use: 0 - not used, <0 - slow down, >0 - speed up
-        uint32  sf_ctr;                         // 16bit fractional counter
-        uint32  sf_val;                         // 16bit fractional increment value
+        uint32  ckmask;                             // bitmask with channels where clock signal is set
+        uint32  ckoff[CNC_MAX_COORDS];              // clock off timeout
 
-        struct SStepCoordinates crt_poz;        // current position
-                                                
+        int32   scale_factor;                       // speed scale factor in use: 0 - not used, <0 - slow down, >0 - speed up
+        uint32  sf_ctr;                             // 16bit fractional counter
+        uint32  sf_val;                             // 16bit fractional increment value
+
+        struct SStepCoordinates crt_poz;            // current position
+
+        enum EIRSuserLevelRequest request;          // requests for user level from ISR
+        bool                      request_on_hold;  // set for inbands - reset when user level notifies about finishing inband termination
     };
 
 
