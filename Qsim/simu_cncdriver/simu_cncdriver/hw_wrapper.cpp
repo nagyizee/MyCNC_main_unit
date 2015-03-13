@@ -13,12 +13,6 @@
 mainw *pClass;
 int tiv;
 
-#define SIMU_DEFAULT_X      0   //130*400
-#define SIMU_DEFAULT_Y      0   //46*400
-#define SIMU_DEFAULT_Z      0   //80*400
-#define SIMU_DEFAULT_A      0   //0
-
-
 /// test stuff ///////////
 
 
@@ -446,10 +440,10 @@ void mainw::HW_wrapper_setup( int interval )
     pClass = this;
     tiv    = interval;
 
-    hw_coords.coord[COORD_X] = SIMU_DEFAULT_X;
-    hw_coords.coord[COORD_Y] = SIMU_DEFAULT_Y;
-    hw_coords.coord[COORD_Z] = SIMU_DEFAULT_Z;
-    hw_coords.coord[COORD_A] = SIMU_DEFAULT_A;
+    hw_coords.coord[COORD_X] = CNC_DEFAULT_X;
+    hw_coords.coord[COORD_Y] = CNC_DEFAULT_Y;
+    hw_coords.coord[COORD_Z] = CNC_DEFAULT_Z;
+    hw_coords.coord[COORD_A] = CNC_DEFAULT_A;
 
 }
 
@@ -778,9 +772,9 @@ void mainw::HW_wrp_front_end_simu()
                 ssimu.resp_data[0] = 0x50;  // acknowledge
                 ssimu.resp_len = 1;
 
-                hw_coords.coord[COORD_X] = SIMU_DEFAULT_X;
-                hw_coords.coord[COORD_Y] = SIMU_DEFAULT_Y;
-                hw_coords.coord[COORD_Z] = SIMU_DEFAULT_Z;
+                hw_coords.coord[COORD_X] = CNC_DEFAULT_X;
+                hw_coords.coord[COORD_Y] = CNC_DEFAULT_Y;
+                hw_coords.coord[COORD_Z] = CNC_DEFAULT_Z;
                 dispsim_add_point();
                 break;
         }

@@ -120,6 +120,9 @@
     // set raw control value for spindle regulator
     int front_end_dbg_set_raw_spindle( uint32 raw_val );
 
+    // do an internal event loop for waiting command completion
+    // routine is synchronous - waits till response message arrives, or returns -1 if timeout or comm. error
+    int front_end_local_event_loop(void);
 
 
 

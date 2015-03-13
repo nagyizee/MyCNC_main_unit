@@ -14,6 +14,13 @@
     #define COORD_Z             2
     #define COORD_A             3
 
+
+    #define CNC_DEFAULT_X      0   //130*400
+    #define CNC_DEFAULT_Y      0   //46*400
+    #define CNC_DEFAULT_Z      0   //80*400
+    #define CNC_DEFAULT_A      0   //0
+
+
     #define MAX_ISR_STEPS       8
     #define MAX_ISR_WRAPMASK    0x07
 

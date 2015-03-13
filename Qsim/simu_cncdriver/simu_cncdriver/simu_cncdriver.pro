@@ -22,7 +22,9 @@ SOURCES += main.cpp\
     ../../../Prog/Project/MainProject/func/events_ui.c \
     ../../../Prog/Project/MainProject/mainapp.c \
     ../../../Prog/Project/MainProject/func/motion_core.c \
-    ../../../Prog/Project/MainProject/func/frontend.c
+    ../../../Prog/Project/MainProject/func/frontend.c \
+    ../../../Prog/Project/MainProject/func/cnc_sequencer.c \
+    ../../../Prog/Project/MainProject/func/command_if.cpp
 
 HEADERS  += mainw.h \
     stm32f10x.h \
@@ -34,6 +36,11 @@ HEADERS  += mainw.h \
     ../../../Prog/Project/MainProject/func/motion_core_internals.h \
     ../../../Prog/Project/MainProject/func/frontend.h \
     ../../../Prog/Project/MainProject/func/frontend_internals.h \
-    ../../../Prog/Project/MainProject/func/comm_fe.h
+    ../../../Prog/Project/MainProject/func/comm_fe.h \
+    ../../../Prog/Project/MainProject/func/cnc_sequencer.h \
+    ../../../Prog/Project/MainProject/func/cnc_sequencer_internals.h \
+    ../../../Prog/Project/MainProject/func/command_if.h \
+    ../../../Prog/Project/MainProject/func/command_if_internals.h \
+    ../../../Prog/Project/MainProject/func/comm_cmd.h
 
 FORMS    += mainw.ui

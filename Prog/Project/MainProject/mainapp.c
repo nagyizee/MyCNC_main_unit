@@ -7,7 +7,7 @@
  *             [ CommandIf ]        - this is the top command input fifo - commands are received from the host system (controller) and stored here
  *                   |                This interface does the negociation with the host system, comm error checking, handshacking, etc.
  *                   |                Commands are inband and outband - Inbands are stored in fifo, outbands are executed right away.
- *                   |                stand-alone commands can be executed only in stopped or paused state
+ *                   |                stand-alone commands can be executed only in stopped or paused state  
  *            ( command fifo )          command list:
  *                   |                      - reset         <stand-alone><outband>: resets everything. setup is needed after it.
  *                   |                      - setup         <stand-alone><outband>: set the maximum travels on each axis, maximum allowed speed, fast transition speeds for internally generated sequences
@@ -23,7 +23,7 @@
  *                   |                      - step          <stand-alone><outband>: will execute a step on the given axis. (direction is given also)
  *                   |                      - scalefeed     <outband>:              Scale the feed speed up/down. valid only in running state
  *                   |                      - scalespindle  <outband>:              Scale the spindle speed up/down. valid only in running state
- *                   |                      - spindle       <inband>:               Spindle speed, units TBD
+ *                   |                      - spindle       <inband>:               Spindle speed, units in rpm
  *                   |                      - goto          <inband>:               go to coordinate. Coordinates and feed speed are given, each param. can be optional, will reuse last value
  *                   |                      - arc           <inband>:               generate arc with helix - same param setup as for goto
  *                   |                      - drill         <inband>:               drill sequence with vertical depth, feed, chip clean quantum, return speed
@@ -32,7 +32,8 @@
  *                   |                      - get_crt_cmd   <outband>:              get the ID of the currently executed inband command, if stopped, the last command's ID
  *                   |
  *                   V
- *            [ Seqence gen.]       - generates movement sequences from the commands.
+ *            [ Seqence gen.]       - this is the main application routine of the CNC driver system
+ *                                  - generates movement sequences from the commands.
  *                   |                  commands like linear transition are simple sequences with one movement element
  *                   |                           circles, helix - are broken down to sequences of lines
  *                   |                           go-home, or tool change - are auto generated sequences to bring the tool in start-up position
@@ -59,7 +60,7 @@
  *                   v
  *            [ motion core ]       - this is the step signal generator for the motors
  *                   |                it does the acceleration - constant - deceleration, or single step instructions.
- *                   |                Acceleration/deceleration factors are calculated at sequence generator.
+ *                   |                Acceleration/deceleration factors are calculated inside.
  *                   |                It has a global speed up/down scaling value - used by sequence generator / command interface
  *                   |
  *                   |
@@ -101,37 +102,13 @@ static inline void System_Poll( void )
 }
 
 
-// Main application routine
-static inline void ProcessApplication( struct SEventStruct *evmask )
-{
-
-    
-    motion_poll( evmask );
-
-}
-
 // Main application entry
 void main_entry( uint32 *stack_top )
 {
     stack_limit = stack_top;
     InitHW();               // init hardware
 
-    motion_init();
-
-    // init
-    struct SStepCoordinates origin;
-    origin.coord[ COORD_X ] = 0; //130*400;
-    origin.coord[ COORD_Y ] = 0; //46*400;
-    origin.coord[ COORD_Z ] = 0; //80*400;
-    origin.coord[ COORD_A ] = 0; //0*400;
-    motion_set_crt_coord( &origin );
-
-
-    motion_pwr_ctrl( COORD_X, mpwr_auto );
-    motion_pwr_ctrl( COORD_Y, mpwr_auto );
-    motion_pwr_ctrl( COORD_Z, mpwr_auto );
-    motion_pwr_ctrl( COORD_A, mpwr_off );
-
+    sequencer_init();
 }
 
 
@@ -146,7 +123,7 @@ void main_loop(void)
     {
         event = Event_Poll( );
 
-        ProcessApplication( &event );
+        sequencer_poll( &event );
 
         Event_Clear( event );
         
