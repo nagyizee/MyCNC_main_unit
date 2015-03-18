@@ -25,9 +25,6 @@
         uint32  timer_tick_100us:1;         // CNC system tick - timing given by STEP_QUANTUM, the minimum timing for max step speed
         uint32  timer_tick_10ms:1;          // 10ms timing tick
 
-        uint32  comm_new_request:1;         // new message from communication port
-        uint32  comm_error_in_full:1;       // input queue full error
-
         uint32  cnc_motion_warn_starving:1; // if motion core is running sequences, input fifo has sequences but output fifo is emptied and IRQ staves
         uint32  cnc_motion_seq_fatal:1;     // fatal error produced in sequence execution (like out of boundaries or impossible speed setup error)
 
@@ -39,7 +36,13 @@
         uint32  fe_spindle_jam:1;           // flag set by front_end_poll when spindle jam is detected
         uint32  fe_op_completed:1;          // flag set by front_end_poll when an operation is finished - set for succeeded and failed also
         uint32  fe_op_failed:1;             // flag set by front_end_poll when an operation is failed ( set together with fe_op_completed )
-    };
+
+        uint32  comm_command_ready:1;       // if a new command is available
+        uint32  comm_command_bulk:1;        // if a bulk command is received
+        uint32  comm_input_overflow:1;      // input queue overflowed
+        uint32  comm_timeout:1;             // communication timeout detected
+
+    };  
 
 
     enum    ELED_operation

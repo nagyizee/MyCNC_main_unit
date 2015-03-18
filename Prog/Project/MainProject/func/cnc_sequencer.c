@@ -15,8 +15,8 @@
  *                       sequence execution scheduler
  *      - frontend:     -physical coordinate readback, endpoint detector,
  *                       spindle control and monitoring
- *      - command_if:   -input command fifo and communication interface with
- *                       the master.
+ *      - command_if:   -input command and communication interface with
+ *                       the master. handles command decoding
  *
  *  The CNC sequencer is responsible of:
  *      - initting: motion_core, frontend, command_if

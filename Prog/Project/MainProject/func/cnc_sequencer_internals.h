@@ -8,6 +8,7 @@
 
     #include "cnc_defs.h"
     #include "cnc_sequencer.h"
+    #include "command_if.h"
 
 
     struct SSequencerSetup
