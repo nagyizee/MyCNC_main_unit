@@ -52,16 +52,17 @@
     // Response to the master:
     //  [OB]    - only one command can be executed once. Response is:
     //              [ACK] + (data)  - immediately after reception and if execution is started without problems
-    //              [NAK]           - faulty communication, timeout, incomplete data, checksum error
+    //              [NAK]           - (internal) faulty communication, timeout, incomplete data, checksum error
     //              [INV]           - erronous or invalid parameters 
     //              [PEN]           - an other outband command is in execution
     // 
     //  [IB]    - inband commands can be sent as bulk with one cksum. Maximum command bulk lenght can not exceed input communication fifo size
     //              [ACK] + [cmd fifo free space]
     //              [NAK]           - faulty communication, timeout, incomplete data, checksum error
-    //              [OVF]           - comm. input fifo overflowed, all commands from this batch are discarded
-    //              [REJ] + [cmdID] - commands from the command with cmdID are rejected because of command fifo full
-    //              [INV] + [cmdID] - commands from the command with cmdID are rejected because of command with cmdID has invalid parameters
+    //              [OVF]           - (internal) comm. input fifo overflowed, all commands from this batch are discarded
+    //              [REJ] + [cmdID] - commands after the command with cmdID are rejected because of command fifo full
+    //              [INV] + [cmdID] - commands after the command with cmdID are rejected because of command with cmdID has invalid parameters
+    //                                  cmdID - means the last successfull command
     // 
     //  for dumps:  [DMP] + (data)  - transmitted periodically
     // 
@@ -77,6 +78,12 @@
     #define RESP_PEN        0x56        // 0101 0110
     #define RESP_OVF        0x53        // 0101 0011        - OVF is sent internally
     #define RESP_REJ        0x5C        // 0101 1100
+
+
+    #define GENFAULT_TABLE_STUCK    0x01        // retried n times recover missing steps - no success
+    #define GENFAULT_SPINDLE_STUCK  0x02        // retried n times recover spindle speed - no success
+    #define GENFAULT_FRONT_END      0x03        // broken link with the front-end ( repeated timeout or data transfer failures )
+                                                
 
     // command type definition:
     // setup commands
@@ -197,16 +204,16 @@
                                                     //              s  - starvation detected
                                                     //              r  - motion core is running
                                                     //              R  - sequencer is running
-                                                    //              f  - coordinate fault (missed steps) detected but fixed
+                                                    //              f  - coordinate fault (missed steps) detected but can be fixed (hopefully - otherwise general failure)
                                                     //              S  - spindle stuck detected but fixed
                                                     //              G  - general failure - must read error code  --- If this is set [freesp] holds the error code
                                                     //                  -- when this happens, sequencer stops and flushes everything
                                                     //                  -- main causes: unrecoverable spindle stuck / missing front-end link / unrecoverable missed step
 
-    #define CMD_OB_GET_ORIGIN               0x34    // returns the measured origin coordinates.
+    #define CMD_OB_GET_PROBE_TOUCH          0x34    // returns the touch point of the probe.
                                                     // IN:      [0xAA][0x34][cksum]
                                                     // OUT:     [ACK][0x88][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz 0000][cksum]
-                                                    //          [INV]    - if no origin was measured yet - call CMD_OBSA_FIND_ORIGIN command
+                                                    //          [INV]    - if no origin was measured yet - call CMD_OBSA_FIND_Z_ZERO command
             
     // inband commands
     // single format:
@@ -269,6 +276,12 @@
         uint32  dir_mask;
     };
 
+    struct SCmdType_GetCoord
+    {
+        bool    is_setup;           // command is a setup, not an immediate poll
+        bool    dmp_enable;         // enable/disable dump (valid only if is_setup = true)
+    };
+
     struct SCmdType_goto
     {
         struct SStepCoordinates coord;
@@ -285,6 +298,46 @@
         uint16  feed;
     };
 
+    struct SCmdResp_inband
+    {
+        uint32  cmdID;          // command ID
+        uint32  Qfree;          // free space in the inband queue
+    };
+
+    struct SCmdResp_stop
+    {
+        uint32  cmdIDex;        // command ID in execution which was interrupted
+        uint32  cmdIDq;         // last command ID from inband queue which was flushed
+    };
+
+    struct SCmdResp_getCoord
+    {
+        uint16  has_data;       // structure has valid data
+        uint16  rpm;            // measured rpm
+        struct  SStepCoordinates coord;
+    };
+
+    struct SCmdResp_status
+    {
+        struct
+        {
+            uint8 ob_op_progress:2;             // 00 - no outband operation in execution, or last one succeeded
+                                                // 01 - last outband operation failed
+                                                // 11 - outband operation in progress
+            uint8 starvation:1;                 // inband fifo starved
+            uint8 run_motion:1;                 // motion core running inbands
+            uint8 run_seq:1;                    // sequencer is running inbands
+            uint8 step_fault:1;                 // missed step detected
+            uint8 spindle_fault:1;              // spindle stuck detected
+            uint8 General_fault:1;              // general fault - system stopped automatically, fifos flushed - check cmdIDex and cmdIDq
+        } s_flags;
+
+        uint8   fault_code;                     // general fault code ( see GENFAULT_XXX )
+        uint8   cmdIDex;                        // command ID currently in execution
+        uint8   cmdIDq;                         // last command ID in queue
+
+        uint32  freeSpace;                      // free space in the queue
+    };
 
     struct ScmdIfCommand
     {
@@ -301,6 +354,7 @@
             struct SCmdType_step        step;
             int32                       scale_feed;
             int32                       scale_spindle;
+            struct SCmdType_GetCoord    get_coord;
             uint32                      coord_dump;         // 0 - coordinate dump off, 1 - coordinate dump on, 2 - poll coordinate
             uint32                      ib_spindle_speed;
             uint32                      ib_wait;
@@ -309,15 +363,18 @@
         }       cmd;
     };
 
-
     struct ScmdIfResponse
     {
         uint32  cmd_type;       // see definitions abowe
         uint32  resp_type;      // see RESP_XXX
         union
         {
-
-
+            uint32                      cmdID;      // used for pause or get current cmdID for ACK or for INV / REJ in case of inbands
+            struct SCmdResp_stop        stop;
+            struct SCmdResp_getCoord    getCoord;
+            struct SCmdResp_status      status;
+            struct SStepCoordinates     touch;
+            struct SCmdResp_inband      inband;     // response to inbands
         }       resp;           // valid for RESP_AKC only
     };
 
@@ -329,22 +386,19 @@
 
 
     // get the arrived command
-    // returns 0 on success, -1 if no command, -2 if command is a bulk one
+    // returns 0 on success, -1 if no command, -2 if command is a bulk one - use cmdif_get_bulk() in that case
     int cmdif_get_command( struct ScmdIfCommand *command );
 
     // send response for a command. 
-    // returns 0 on success, -1 if no outband command was get with cmdif_get_outband()
-    int cmdif_confirm_command_reception( struct ScmdIfResponse *response );
+    // returns 0 on success, -1 if send fifo is full
+    // as a rule - cmdif_get_inband() is called till fails - assuring reception of a whole batch - this routine will trow away
+    // any excess data from the batch
+    int cmdif_confirm_reception( struct ScmdIfResponse *response );
 
-    // get an inband command. Since inbands can be transmitted in bulk, call this routine till it returns -1
-    // returns 0 on success, -1 if no more inband command
+    // Get inbands from bulk, since inbands can be transmitted in bulk, call this routine till it returns -1
+    // returns 0 on success, -1 if no more inbands in bulk
     int cmdif_get_bulk( struct ScmdIfCommand *command );
     
-    // send response for an inband batch
-    // as a rule - cmdif_get_inband() is called till fails - assuring reception of a whole batch - this routine will trow away any excess data from the
-    // batch
-    int cmdif_confirm_bulk_reception( struct ScmdIfResponse *response );
-
 
 #ifdef __cplusplus
     }

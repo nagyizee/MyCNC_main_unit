@@ -22,6 +22,8 @@
     // get input data lenght
     uint32 comm_cmd_GetInLength(void);
 
+    uint32 comm_cmd_GetOutFree(void);
+
     // returns a character from input fifo, -1 if queue is empty
     uint32 comm_rdChar(void);
 

@@ -18,10 +18,16 @@ static void internal_command_flush( void )
     comm.bulk_poz = 0;
 }
 
-static void internal_add_cksum( uint32 byte )
+static void internal_add_cksum( uint8 byte )
 {
     comm.cksum += byte;     // TBD
 }
+
+static uint8 internal_add_out_cksum( uint8 *cksum, uint8 byte )
+{
+    *cksum += byte;     // TBD
+}
+
 
 static void internal_respond_byte( uint8 byte )
 {
@@ -40,16 +46,20 @@ static int internal_check_command( uint32 cmd_id, uint32 cmd_len, bool check_ib 
         case CMD_OBSA_START:
         case CMD_OB_PAUSE:
         case CMD_OB_STOP:
-        case CMD_OB_GET_CRT_COORD:
         case CMD_OB_GET_CRT_CMD_ID:
         case CMD_OB_GET_STATUS:
-        case CMD_OB_GET_ORIGIN:
+        case CMD_OB_GET_PROBE_TOUCH:
             if ( check_ib )
                 return -1;
             if ( cmd_len == 0 )
                 return 0;   // ok
             break;
-
+        case CMD_OB_GET_CRT_COORD:
+            if ( check_ib )
+                return -1;
+            if ( (cmd_len == 0) || (cmd_len == 1) )
+                return 0;
+            break;
         case CMD_OBSA_SETUP_MAX_TRAVEL:
         case CMD_OBSA_SETUP_HOME_POZ:
             if ( check_ib )
@@ -173,6 +183,21 @@ static int internal_pc_getscale( int32 *value )
     return 0;
 }
 
+static inline int internal_pc_getcrtCoord( struct ScmdIfCommand *command )
+{
+    if ( comm.p_len )
+    {
+        command->cmd.get_coord.is_setup = true;
+        command->cmd.get_coord.dmp_enable = (comm_buffer[0] & 0x01) ? true : false;
+    }
+    else
+    {
+        command->cmd.get_coord.is_setup = false;
+        command->cmd.get_coord.dmp_enable = false;
+    }
+    return 0;
+}
+
 static inline int internal_pc_spindle( uint8 *buffer, struct ScmdIfCommand *command )
 {   
     //                0        1          2
@@ -271,7 +296,184 @@ static inline internal_pc_drill( uint8 *buffer, struct ScmdIfCommand *command )
     return 0;
 }
 
-           
+
+static int internal_sr_generic_1_byte( uint8 ack )
+{
+    if ( comm_cmd_GetOutFree() >= 1 )
+    {
+        comm_wrChar( ack );
+        return 0;
+    }
+    return -1;
+}
+
+static int internal_sr_generic_2_bytes( uint8 ack, uint8 param )
+{
+    if ( comm_cmd_GetOutFree() >= 2 )
+    {
+        comm_wrChar( ack );
+        comm_wrChar( param );
+        return 0;
+    }
+    return -1;
+}
+
+static int internal_sr_ack_cmdID( uint8 cmdID )
+{
+    // [ACK][0x81][cmdID][cksum]
+    uint8 cksum = (uint8)(COMMCKSUMSTART);
+    if ( comm_cmd_GetOutFree() < 4 )
+        return -1;
+
+    comm_wrChar( RESP_ACK );
+    comm_wrChar( 0x81 );
+    internal_add_out_cksum( &cksum, 0x81 );
+    comm_wrChar( cmdID );
+    internal_add_out_cksum( &cksum, cmdID );
+    comm_wrChar( cksum );
+    return 0;
+}
+
+static inline int internal_sr_ack_stop( struct ScmdIfResponse *response )
+{
+    // [ACK][0x82][cmdIDex][cmdIDq][cksum]
+    uint8 cksum = (uint8)(COMMCKSUMSTART);
+    if ( comm_cmd_GetOutFree() < 4 )
+        return -1;
+
+    comm_wrChar( RESP_ACK );
+    comm_wrChar( 0x82 );
+    internal_add_out_cksum( &cksum, 0x82 );
+    comm_wrChar( (uint8)response->resp.stop.cmdIDex );
+    internal_add_out_cksum( &cksum, (uint8)response->resp.stop.cmdIDex );
+    comm_wrChar( (uint8)response->resp.stop.cmdIDq );
+    internal_add_out_cksum( &cksum, (uint8)response->resp.stop.cmdIDq );
+    comm_wrChar( cksum );
+    return 0;
+}
+
+static int internal_sr_dump_coordinates( uint8 resp_type, struct ScmdIfResponse *response )
+{
+    // [ACK][0x8C][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][rrrr rrrr][rrrr rrrr][cksum]
+    uint8 cksum = (uint8)(COMMCKSUMSTART);
+    uint8 data;
+    int i;
+
+    if ( comm_cmd_GetOutFree() < 15 )
+        return -1;
+
+    comm_wrChar( resp_type );
+    comm_wrChar( 0x8C );
+    internal_add_out_cksum( &cksum, 0x8C );
+
+    for (i=0; i<2; i++)
+    {
+        // X/Z:  [xxxx xxxx][xxxx xxxx][xxxx 0000]    high bit to low bit
+        data = ((response->resp.getCoord.coord.coord[i*2+0] >> 12) & 0xff);
+        comm_wrChar(data);
+        internal_add_out_cksum( &cksum, data );
+        data = ((response->resp.getCoord.coord.coord[i*2+0] >> 4)  & 0xff);
+        comm_wrChar(data);
+        internal_add_out_cksum( &cksum, data );
+        // Y/A:  [0000 yyyy][yyyy yyyy][yyyy yyyy]   
+        data = ((response->resp.getCoord.coord.coord[i*2+0] << 4)  & 0xf0) | ((response->resp.getCoord.coord.coord[i*2+1] >> 16) & 0x0f);
+        comm_wrChar(data);
+        internal_add_out_cksum( &cksum, data );
+        data = ((response->resp.getCoord.coord.coord[i*2+1] >> 8) & 0xff);
+        comm_wrChar(data);
+        internal_add_out_cksum( &cksum, data );
+        data = ((response->resp.getCoord.coord.coord[i*2+1] >> 0) & 0xff);
+        comm_wrChar(data);
+        internal_add_out_cksum( &cksum, data );
+    }
+    data = ((response->resp.getCoord.rpm >> 8) & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    data = (response->resp.getCoord.rpm & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    comm_wrChar( cksum );
+    return 0;
+}
+
+static inline int internal_sr_ack_status( struct ScmdIfResponse *response )
+{
+    // [ACK][0x84][GSfR rscc][cmdIDex][cmdIDq][freesp][cksum]
+    uint8 cksum = (uint8)(COMMCKSUMSTART);
+    if ( comm_cmd_GetOutFree() < 7 )
+        return -1;
+
+    comm_wrChar( RESP_ACK );
+    comm_wrChar( 0x84 );
+    internal_add_out_cksum( &cksum, 0x84 );
+
+    comm_wrChar( (uint8)response->resp.status.s_flags );
+    internal_add_out_cksum( &cksum, (uint8)response->resp.status.s_flags );
+    comm_wrChar( response->resp.status.cmdIDex );
+    internal_add_out_cksum( &cksum, response->resp.status.cmdIDex );
+    comm_wrChar( response->resp.status.cmdIDq );
+    internal_add_out_cksum( &cksum, response->resp.status.cmdIDq );
+    if ( response->resp.status.s_flags.General_fault )
+    {
+        comm_wrChar( response->resp.status.fault_code );
+        internal_add_out_cksum( &cksum, response->resp.status.fault_code );
+    }
+    else
+    {
+        comm_wrChar( (uint8)response->resp.status.freeSpace );
+        internal_add_out_cksum( &cksum, (uint8)response->resp.status.freeSpace );
+    }
+    comm_wrChar( cksum );
+    return 0;
+}
+
+static inline int internal_sr_ack_probe_touch( struct ScmdIfResponse *response )
+{
+    // [ACK][0x88][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz 0000][cksum]
+    uint8 cksum = (uint8)(COMMCKSUMSTART);
+    uint8 data;
+    int i;
+
+    if ( comm_cmd_GetOutFree() < 11 )
+        return -1;
+
+    comm_wrChar( RESP_ACK );
+    comm_wrChar( 0x88 );
+    internal_add_out_cksum( &cksum, 0x88 );
+
+    // X:  [xxxx xxxx][xxxx xxxx][xxxx 0000]    high bit to low bit
+    data = ((response->resp.touch.coord[0] >> 12) & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    data = ((response->resp.touch.coord[0] >> 4)  & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    // Y:  [0000 yyyy][yyyy yyyy][yyyy yyyy]   
+    data = ((response->resp.touch.coord[0] << 4)  & 0xf0) | ((response->resp.touch.coord[1] >> 16) & 0x0f);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    data = ((response->resp.touch.coord[1] >> 8) & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    data = ((response->resp.touch.coord[1] >> 0) & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    // Z:  [zzzz zzzz][zzzz zzzz][zzzz 0000]    high bit to low bit
+    data = ((response->resp.touch.coord[2] >> 12) & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    data = ((response->resp.touch.coord[2] >> 4)  & 0xff);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+    data = ((response->resp.touch.coord[2] << 4)  & 0xf0);
+    comm_wrChar(data);
+    internal_add_out_cksum( &cksum, data );
+
+    comm_wrChar( cksum );
+    return 0;
+}
+
+
 static int internal_parse_command( uint32 cmd_id, uint8 *buffer, uint32 plen, struct ScmdIfCommand *command )
 {
     int res = -3;
@@ -296,10 +498,10 @@ static int internal_parse_command( uint32 cmd_id, uint8 *buffer, uint32 plen, st
         case CMD_OB_STOP:               res = 0; break;
         case CMD_OB_SCALE_FEED:         res = internal_pc_getscale( &command->cmd.scale_feed ); break;
         case CMD_OB_SCALE_SPINDLE:      res = internal_pc_getscale( &command->cmd.scale_spindle ); break;
-        case CMD_OB_GET_CRT_COORD:      res = 0; break;
+        case CMD_OB_GET_CRT_COORD:      res = internal_pc_getcrtCoord( command ); break;
         case CMD_OB_GET_CRT_CMD_ID:     res = 0; break;  
         case CMD_OB_GET_STATUS:         res = 0; break;
-        case CMD_OB_GET_ORIGIN:         res = 0; break;
+        case CMD_OB_GET_PROBE_TOUCH:    res = 0; break;
         case CMD_IB_BULK:               res = -2; break;
         case CMD_IB_SPINDLE:            res = internal_pc_spindle( buffer, command ); break;
         case CMD_IB_WAIT:               res = internal_pc_wait( buffer, command ); break;
@@ -309,6 +511,88 @@ static int internal_parse_command( uint32 cmd_id, uint8 *buffer, uint32 plen, st
 
     return res;
 }
+
+
+static int internal_send_response( struct ScmdIfResponse *response )
+{
+    int res = 0;
+    switch ( response->resp_type )
+    {
+        case RESP_ACK:
+            switch ( response->cmd_type )
+            {
+                case CMD_OB_PAUSE: 
+                case CMD_OB_GET_CRT_CMD_ID:           
+                    res = internal_sr_ack_cmdID( response->resp.cmdID );
+                    break;
+                case CMD_OB_STOP:           
+                    res = internal_sr_ack_stop( response );
+                    break;     
+                case CMD_OB_GET_CRT_COORD: 
+                    if ( response->resp.getCoord.has_data )
+                        res = internal_sr_dump_coordinates( RESP_ACK, response );
+                    else
+                        res = internal_sr_generic_2_bytes( RESP_ACK, 0 );
+                    break;
+                case CMD_OB_GET_STATUS: 
+                    res = internal_sr_ack_status( response );     
+                    break;
+                case CMD_OB_GET_PROBE_TOUCH:  
+                    res = internal_sr_ack_probe_touch( response );
+                    break;
+                case CMD_IB_BULK:               
+                case CMD_IB_SPINDLE:            
+                case CMD_IB_WAIT:               
+                case CMD_IB_GOTO:               
+                case CMD_IB_DRILL: 
+                    res = internal_sr_generic_2_bytes( RESP_ACK, (uint8)response->resp.inband.Qfree ); 
+                    break;
+                default:
+                    res = internal_sr_generic_2_bytes( RESP_ACK, 0 ); 
+                    break;
+            }
+            break;
+        case RESP_DMP:
+            res = internal_sr_dump_coordinates( RESP_DMP, response );
+            break;
+        case RESP_INV:
+            switch ( response->cmd_type )
+            {
+                case CMD_IB_BULK:               
+                case CMD_IB_SPINDLE:            
+                case CMD_IB_WAIT:               
+                case CMD_IB_GOTO:               
+                case CMD_IB_DRILL: 
+                    res = internal_sr_generic_2_bytes( RESP_INV, (uint8)response->resp.cmdID ); 
+                    break;
+                default:
+                    res = internal_sr_generic_1_byte( RESP_INV );
+                    break;
+            }
+            break;
+        case RESP_PEN:
+            res = internal_sr_generic_1_byte( RESP_PEN );
+            break;
+        case RESP_REJ:
+            switch ( response->cmd_type )
+            {
+                case CMD_IB_BULK:               
+                case CMD_IB_SPINDLE:            
+                case CMD_IB_WAIT:               
+                case CMD_IB_GOTO:               
+                case CMD_IB_DRILL: 
+                    res = internal_sr_generic_2_bytes( RESP_REJ, (uint8)response->resp.cmdID ); 
+                    break;
+                default:
+                    res = -3;
+                    break;
+            }
+            break;
+    }
+}
+
+
+
 
 /* *************************************************
  *
@@ -326,13 +610,6 @@ void cmdif_poll( struct SEventStruct *evt )
 {
     uint32 in_size;
 
-    if ( comm.state == CSTATE_CMD_TO_GET )
-    {
-        // if command is prepared and not pulled by application
-        evt->comm_command_ready = 1;
-        return;
-    }
-
     do
     {
         if ( comm_cmd_poll() == COMFLAG_OVERFLOW )
@@ -340,6 +617,13 @@ void cmdif_poll( struct SEventStruct *evt )
             comm_cmd_InFlush();
             internal_command_flush();
             evt->comm_input_overflow = 1;
+        }
+
+        if ( comm.state == CSTATE_CMD_TO_GET )
+        {
+            // if command is prepared and not pulled by application
+            evt->comm_command_ready = 1;
+            return;
         }
 
         in_size = comm_cmd_GetInLength();
@@ -500,6 +784,7 @@ int cmdif_get_command( struct ScmdIfCommand *command )
         return -1;
     if ( comm.is_bulk )
         return -2;
+
     // comm buffer - holds the payload only
     res = internal_parse_command( comm.cmd_id, comm_buffer, comm.p_len, command );
     internal_command_flush();           // release the command buffer regardless of result
@@ -507,9 +792,18 @@ int cmdif_get_command( struct ScmdIfCommand *command )
 }
 
 
-int cmdif_confirm_command_reception( struct ScmdIfResponse *response )
+int cmdif_confirm_reception( struct ScmdIfResponse *response )
 {
+    int res;
 
+    // send the response
+    res = internal_send_response( response );
+
+    // if sending is successfull, and bulk buffer is still not processed fully - flush the buffer and state
+    if ( (res != -1) && ( comm.state == CSTATE_CMD_TO_GET ) )
+        internal_command_flush();     
+
+    return res;
 }
 
 
@@ -544,12 +838,5 @@ int cmdif_get_bulk( struct ScmdIfCommand *command )
     }
     return -1;
 }
-
-
-int cmdif_confirm_bulk_reception( struct ScmdIfResponse *response )
-{
-
-}
-
 
 
