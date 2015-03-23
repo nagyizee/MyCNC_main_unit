@@ -69,7 +69,6 @@
 
     #define CMD_INPUT_BUFFER_SIZE       256
 
-
     #define RESP_ACK        0xA5        // 1010 0101
     #define RESP_DMP        0xAF        // 1010 1111
 
@@ -319,17 +318,21 @@
 
     struct SCmdResp_status
     {
-        struct
+        union
         {
-            uint8 ob_op_progress:2;             // 00 - no outband operation in execution, or last one succeeded
-                                                // 01 - last outband operation failed
-                                                // 11 - outband operation in progress
-            uint8 starvation:1;                 // inband fifo starved
-            uint8 run_motion:1;                 // motion core running inbands
-            uint8 run_seq:1;                    // sequencer is running inbands
-            uint8 step_fault:1;                 // missed step detected
-            uint8 spindle_fault:1;              // spindle stuck detected
-            uint8 General_fault:1;              // general fault - system stopped automatically, fifos flushed - check cmdIDex and cmdIDq
+            struct
+            {
+                uint8 ob_op_progress:2;             // 00 - no outband operation in execution, or last one succeeded
+                                                    // 01 - last outband operation failed
+                                                    // 11 - outband operation in progress
+                uint8 starvation:1;                 // inband fifo starved
+                uint8 run_motion:1;                 // motion core running inbands
+                uint8 run_seq:1;                    // sequencer is running inbands
+                uint8 step_fault:1;                 // missed step detected
+                uint8 spindle_fault:1;              // spindle stuck detected
+                uint8 General_fault:1;              // general fault - system stopped automatically, fifos flushed - check cmdIDex and cmdIDq
+            } f;
+            uint8 val;
         } s_flags;
 
         uint8   fault_code;                     // general fault code ( see GENFAULT_XXX )

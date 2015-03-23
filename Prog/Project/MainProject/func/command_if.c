@@ -286,10 +286,10 @@ static inline internal_pc_drill( uint8 *buffer, struct ScmdIfCommand *command )
     command->cmd_inband = 1;
     command->cmdID = comm_buffer[0];
 
-    command->cmd.ib_drill.coord[COORD_X] = (comm_buffer[1] << 12) | (comm_buffer[2] << 4) | (comm_buffer[3] >> 4);
-    command->cmd.ib_drill.coord[COORD_Y] = ( (comm_buffer[3] & 0x0f) << 16) | (comm_buffer[4]<<8) | (comm_buffer[5]);
-    command->cmd.ib_drill.coord[COORD_Z] = (comm_buffer[6] << 12) | (comm_buffer[7] << 4) | (comm_buffer[8] >> 4);
-    command->cmd.ib_drill.coord[COORD_A] = ( (comm_buffer[8] & 0x0f) << 16) | (comm_buffer[9]<<8) | (comm_buffer[10]);
+    command->cmd.ib_drill.coord.coord[COORD_X] = (comm_buffer[1] << 12) | (comm_buffer[2] << 4) | (comm_buffer[3] >> 4);
+    command->cmd.ib_drill.coord.coord[COORD_Y] = ( (comm_buffer[3] & 0x0f) << 16) | (comm_buffer[4]<<8) | (comm_buffer[5]);
+    command->cmd.ib_drill.coord.coord[COORD_Z] = (comm_buffer[6] << 12) | (comm_buffer[7] << 4) | (comm_buffer[8] >> 4);
+    command->cmd.ib_drill.coord.coord[COORD_A] = ( (comm_buffer[8] & 0x0f) << 16) | (comm_buffer[9]<<8) | (comm_buffer[10]);
     command->cmd.ib_drill.cycles = comm_buffer[11];
     command->cmd.ib_drill.feed = (comm_buffer[12] << 4) | (comm_buffer[13] >> 4);
     command->cmd.ib_drill.clearance = ( (comm_buffer[13] & 0x0f) << 8) | (comm_buffer[14]);
@@ -407,13 +407,13 @@ static inline int internal_sr_ack_status( struct ScmdIfResponse *response )
     comm_wrChar( 0x84 );
     internal_add_out_cksum( &cksum, 0x84 );
 
-    comm_wrChar( (uint8)response->resp.status.s_flags );
-    internal_add_out_cksum( &cksum, (uint8)response->resp.status.s_flags );
+    comm_wrChar( (uint8)response->resp.status.s_flags.val );
+    internal_add_out_cksum( &cksum, (uint8)response->resp.status.s_flags.val );
     comm_wrChar( response->resp.status.cmdIDex );
     internal_add_out_cksum( &cksum, response->resp.status.cmdIDex );
     comm_wrChar( response->resp.status.cmdIDq );
     internal_add_out_cksum( &cksum, response->resp.status.cmdIDq );
-    if ( response->resp.status.s_flags.General_fault )
+    if ( response->resp.status.s_flags.f.General_fault )
     {
         comm_wrChar( response->resp.status.fault_code );
         internal_add_out_cksum( &cksum, response->resp.status.fault_code );
@@ -644,7 +644,7 @@ void cmdif_poll( struct SEventStruct *evt )
                             comm.is_bulk    = 0;
 
                             comm.state      = CSTATE_GET_ID;
-                            comm.cksum      = (uint8)(COMMCKSUMSTART)
+                            comm.cksum      = (uint8)(COMMCKSUMSTART);
                             internal_add_cksum( byte );
                             comm.time_out   = COMMREC_TIMEOUT;
                         }
@@ -665,7 +665,7 @@ void cmdif_poll( struct SEventStruct *evt )
                         }
                         else
                         {
-                            comm.state  CSTATE_GET_CKSUM;
+                            comm.state = CSTATE_GET_CKSUM;
                         }
                     }
                     break;

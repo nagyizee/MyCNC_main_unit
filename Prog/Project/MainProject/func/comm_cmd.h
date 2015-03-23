@@ -12,6 +12,8 @@
     #define COMFLAG_OK          0x00
     #define COMFLAG_OVERFLOW    0x01
 
+    #define COMMCKSUMSTART              0xA9
+
 
     // comm port polling routine
     uint32 comm_cmd_poll(void);

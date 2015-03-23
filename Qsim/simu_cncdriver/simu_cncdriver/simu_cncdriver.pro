@@ -24,7 +24,7 @@ SOURCES += main.cpp\
     ../../../Prog/Project/MainProject/func/motion_core.c \
     ../../../Prog/Project/MainProject/func/frontend.c \
     ../../../Prog/Project/MainProject/func/cnc_sequencer.c \
-    ../../../Prog/Project/MainProject/func/command_if.cpp
+    ../../../Prog/Project/MainProject/func/command_if.c
 
 HEADERS  += mainw.h \
     stm32f10x.h \

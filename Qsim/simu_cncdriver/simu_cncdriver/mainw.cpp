@@ -22,6 +22,33 @@ mainw::mainw(QWidget *parent) :
     HW_wrapper_setup( TIMER_INTERVAL );
 
     memset( buttons, 0, sizeof(bool)*3 );
+    memset( &cmd_list, 0, sizeof(cmd_list) );
+
+
+    // setup text boxes
+    QTextOption text_opt;
+    QFont fnt;
+
+    doc_commands = new QTextDocument("# command list", this);
+    doc_comm_log = new QTextDocument("---- communication log ----", this);
+
+    fnt = ui->txt_commands->font();
+    doc_commands->setDefaultFont( fnt );
+    doc_comm_log->setDefaultFont( fnt );
+
+    ui->txt_commands->setDocument( doc_commands );
+    text_opt = doc_commands->defaultTextOption();
+    text_opt.setWrapMode( QTextOption::NoWrap );
+    doc_commands->setDefaultTextOption( text_opt );
+    doc_commands->setMaximumBlockCount(-1);
+
+    ui->txt_comm_window->setDocument( doc_comm_log );
+    ui->txt_comm_window->setFont( fnt );
+    text_opt = doc_comm_log->defaultTextOption();
+    text_opt.setWrapMode( QTextOption::NoWrap );
+    doc_comm_log->setDefaultTextOption( text_opt );
+    doc_comm_log->setMaximumBlockCount(1000);
+
 
     // set up the graphic display simulator
     gmem_xy    = (uchar*)malloc( DISPSIM_MAX_W * DISPSIM_MAX_H * 3 );
@@ -249,4 +276,47 @@ void mainw::on_nm_scale_editingFinished()
 void mainw::on_pb_fe_spindle_jam_clicked()
 {
     HW_wrp_spindle_jam();
+}
+
+void mainw::on_pb_cmd_feed_line_clicked()
+{
+    QTextBlock tb;
+    QTextCharFormat format;
+    QString line;
+
+    tb = doc_commands->findBlockByNumber( cmd_list.crt_line );
+    QTextCursor tc( doc_commands->findBlockByNumber( cmd_list.crt_line ) );
+    line = tb.text();
+
+    if (HW_wrp_input_line( line ))
+    {
+        format.setForeground( Qt::red );
+    }
+    else
+    {
+        format.setForeground( Qt::lightGray );
+        cmd_list.crt_line++;
+    }
+
+    tc.movePosition( QTextCursor::StartOfBlock);
+    ui->txt_commands->setTextCursor(tc);
+    tc.select(QTextCursor::BlockUnderCursor);
+    tc.setCharFormat( format );
+
+    // format.setBackground( Qt::transparent );
+
+}
+
+void mainw::on_pb_cmd_restart_clicked()
+{
+    QTextCharFormat format;
+    QTextCursor tc( doc_commands );
+
+    cmd_list.crt_line = 0;
+
+    tc.movePosition( QTextCursor::StartOfBlock);
+    ui->txt_commands->setTextCursor(tc);
+    tc.select(QTextCursor::Document);
+    format.setForeground( Qt::black );
+    tc.setCharFormat( format );
 }

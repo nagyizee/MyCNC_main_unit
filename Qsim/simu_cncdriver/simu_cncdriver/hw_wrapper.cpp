@@ -1,11 +1,18 @@
+#include <QScrollBar>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include "mainw.h"
 #include "ui_mainw.h"
 #include "motion_core.h"
 #include "cnc_defs.h"
 #include "hw_stuff.h"
 #include "comm_fe.h"
+#include "comm_cmd.h"
+#include "command_if.h"
 #include "frontend_internals.h"
+
 
 #define MAX_AXIS_CHANNELS 4
 
@@ -554,17 +561,685 @@ bool mainw::HW_wrp_fe_broken_link()
     return ui->pb_fe_break_link->isChecked();
 }
 
+
+/////////////////////////////////////////////////////
+// Master unit comm. simulation
+/////////////////////////////////////////////////////
+
+
+uint32 comm_cmd_poll(void)
+{
+
+    return 0;
+}
+
+void comm_cmd_InFlush(void)
+{
+
+}
+
+uint32 comm_cmd_GetInLength(void)
+{
+
+    return 0;
+}
+
+uint32 comm_cmd_GetOutFree(void)
+{
+
+    return 0;
+}
+
+uint32 comm_rdChar(void)
+{
+
+    return 0;
+}
+
+uint32 comm_wrChar( uint8 byte )
+{
+
+    return 0;
+}
+
+
+
+
+/*  Parsing commands:
+ *  '#' - marks comments
+ *  command elements are in '[ ]'
+ *
+ *  [H] - header byte
+ *  [C_xxx] - command indicator, where xxx is the abreviated command ID, see list below
+ *  [P_xxx] - payload. Payload elements are separated by ','. notation for elemets is done by <...>
+ *  [S] - checksum
+ *                                     C_xxx        P_xxx
+ *  command list - ( xxx ):
+ *    - CMD_OBSA_RESET:                 "rest"
+ *    - CMD_OBSA_SETUP_MAX_TRAVEL:      "stmt"      <x>,<y>,<z>,<a>                 ex:   [H][C_stmt][P_1200,3400,600,800][S]
+ *    - CMD_OBSA_SETUP_MAX_SPEEDS:      "stms"      <max>,<rapid>
+ *    - CMD_OBSA_SETUP_HOME_POZ:        "sthm"      <x>,<y>,<z>,<a>
+ *    - CMD_OBSA_SETUP_PROBE_POZ:       "stpp"      <x>,<y>
+ *    - CMD_OBSA_FIND_ORIGIN            "forg"
+ *    - CMD_OBSA_GO_HOME                "home"
+ *    - CMD_OBSA_FIND_Z_ZERO            "fzzr"
+ *    - CMD_OBSA_STEP                   "step"      <coord list><dir>        coord list can be like "xya", dir is "+--"  ->  [H][C_step][P_xya,+--][S]
+ *    - CMD_OBSA_START                  "STRT"
+ *    - CMD_OB_PAUSE                    "PAUS"
+ *    - CMD_OB_STOP                     "STOP"
+ *    - CMD_OB_SCALE_FEED               "scfd"      <+/-factor>                     ex:   [H][C_scfd][P_-50][S]
+ *    - CMD_OB_SCALE_SPINDLE            "scsp"      <+/-factor>
+ *    - CMD_OB_GET_CRT_COORD            "gcrd"      <1/0>                    if P_xxx is missing then polling command will be used
+ *    - CMD_OB_GET_CRT_CMD_ID           "gcmd"
+ *    - CMD_OB_GET_STATUS               "gsts"
+ *    - CMD_OB_GET_PROBE_TOUCH          "gthc"
+ *    - CMD_IB_BULK                     "iblk"                               this should be followed by a command+param list
+ *    - CMD_IB_SPINDLE                  "isps"      <id><rpm>
+ *    - CMD_IB_WAIT                     "iwai"      <id><sec>
+ *    - CMD_IB_GOTO                     "igoo"      <id><coord list+feed><p1><p2>...<feed>          coord list: "xyzaf", feed is always the last
+ *    - CMD_IB_DRILL                    "idrl"      <id><x><y><ztop><zbtm><cyc><feed><clrtop>
+ *
+ *  Example for bulk:
+ *      [H][C_iblk][C_isps][P_1,20000][C_igoo][P_2,xyf,1000,500,350][C_igoo][P_3,z,800][S]
+ *
+ *
+ */
+
+
+int local_tokenize_msg( char *str, char *token )
+{
+    int i = 0;
+    int ptr = 0;
+    // find the firs char
+    while ( (str[0] == ' ') || (str[0] == '\t') )
+    {
+        ptr++;
+        str++;
+        if ( str[0] == 0 )
+            return -1;      // no token found
+    }
+
+    // find the end of the token
+    while ( str[i] != ']' )
+    {
+        if ( str[i] == 0 )  // invalid token
+            return -1;      
+        token[i] = str[i];
+        i++;
+        ptr++;
+    }
+    token[i] = 0;
+    return ptr + 1;
+}
+
+
+int local_parse_max_travel( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int values[4];
+    int i;
+    int ptr;
+    char *token;
+
+    ptr = *out_ptr;
+
+    token = strtok( chunk, " ," );
+    for ( i=0; i<4; i++ )
+    {
+        if ( token == NULL )
+            return -1;
+        values[i] = atoi(token);
+        token = strtok( NULL, " ," );
+    }
+
+    // X:  [xxxx xxxx][xxxx xxxx][xxxx 0000]    high bit to low bit
+    outdata[ptr++] = ((values[0] >> 12) & 0xff);
+    outdata[ptr++] = ((values[0] >> 4)  & 0xff);
+    // Y:  [0000 yyyy][yyyy yyyy][yyyy yyyy]   
+    outdata[ptr++] = ((values[0] << 4)  & 0xf0) | ((values[1] >> 16) & 0x0f);
+    outdata[ptr++] = ((values[1] >> 8) & 0xff);
+    outdata[ptr++] = ((values[1] >> 0) & 0xff);
+    // Z:  [zzzz zzzz][zzzz zzzz][zzzz 0000]
+    outdata[ptr++] = ((values[2] >> 12) & 0xff);
+    outdata[ptr++] = ((values[2] >> 4)  & 0xff);
+    // A:  [0000 aaaa][aaaa aaaa][aaaa aaaa]   
+    outdata[ptr++] = ((values[2] << 4)  & 0xf0) | ((values[3] >> 16) & 0x0f);
+    outdata[ptr++] = ((values[3] >> 8) & 0xff);
+    outdata[ptr++] = ((values[3] >> 0) & 0xff);
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_max_speed( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int values[2];
+    int i;
+    int ptr;
+    char *token;
+
+    ptr = *out_ptr;
+
+    token = strtok( chunk, " ," );
+    for ( i=0; i<2; i++ )
+    {
+        if ( token == NULL )
+            return -1;
+        values[i] = atoi(token);
+        token = strtok( NULL, " ," );
+
+        outdata[ptr++] = ((values[i] >> 8) & 0xff);
+        outdata[ptr++] = ((values[i] >> 0)  & 0xff);
+    }
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_probe_poz( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int values[2];
+    int i;
+    int ptr;
+    char *token;
+
+    ptr = *out_ptr;
+
+    token = strtok( chunk, " ," );
+    for ( i=0; i<2; i++ )
+    {
+        if ( token == NULL )
+            return -1;
+        values[i] = atoi(token);
+        token = strtok( NULL, " ," );
+    }
+
+    // X:  [xxxx xxxx][xxxx xxxx][xxxx 0000]    high bit to low bit
+    outdata[ptr++] = ((values[0] >> 12) & 0xff);
+    outdata[ptr++] = ((values[0] >> 4)  & 0xff);
+    // Y:  [0000 yyyy][yyyy yyyy][yyyy yyyy]   
+    outdata[ptr++] = ((values[0] << 4)  & 0xf0) | ((values[1] >> 16) & 0x0f);
+    outdata[ptr++] = ((values[1] >> 8) & 0xff);
+    outdata[ptr++] = ((values[1] >> 0) & 0xff);
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+
+int local_parse_step( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int i;
+    int ptr;
+    char *token[2];
+    uint8 field = 0;
+
+    ptr = *out_ptr;
+
+    token[0] = strtok( chunk, " ," );
+    token[1] = strtok( NULL, " ," );
+    if ( (token[0] == NULL) || (token[1] == NULL) || (strlen(token[0]) != strlen(token[1])) )
+        return -1;
+
+    for (i=0; i<strlen(token[0]); i++ )
+    {
+        switch ( token[0][i] )
+        {
+            case 'x':   field |= 0x10;  if ( token[1][i] == '+' )   field |= 0x01;  break;
+            case 'y':   field |= 0x20;  if ( token[1][i] == '+' )   field |= 0x02;  break;
+            case 'z':   field |= 0x40;  if ( token[1][i] == '+' )   field |= 0x04;  break;
+            case 'a':   field |= 0x80;  if ( token[1][i] == '+' )   field |= 0x08;  break;
+            default:    return -1;
+        }
+    }
+
+    outdata[ptr++] = field;
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_scale( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int ptr;
+    char *token;
+    int16 *val_ptr;
+
+    ptr = *out_ptr;
+    token = strtok( chunk, " ," );
+
+    val_ptr = (int16*)(outdata + ptr);
+    *val_ptr = atoi(token);
+    ptr += 2;
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_ctr_coord( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int ptr;
+    char *token;
+    int16 *val_ptr;
+
+    ptr = *out_ptr;
+    token = strtok( chunk, " ," );
+
+    if ( token[0] == '1' )
+        outdata[ptr++] = 0x01;
+    else
+        outdata[ptr++] = 0x00;
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_ib_spindle( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int i;
+    int ptr;
+    char *token[2];
+
+    ptr = *out_ptr;
+
+    token[0] = strtok( chunk, " ," );
+    token[1] = strtok( NULL, " ," );
+    if ( (token[0] == NULL) || (token[1] == NULL) )
+        return -1;
+
+    outdata[ptr++] = atoi(token[0]);
+    outdata[ptr++] = (atoi(token[1]) >> 8) & 0xff;
+    outdata[ptr++] = atoi(token[1]) & 0xff;
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_ib_wait( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int i;
+    int ptr;
+    char *token[2];
+
+    ptr = *out_ptr;
+
+    token[0] = strtok( chunk, " ," );
+    token[1] = strtok( NULL, " ," );
+    if ( (token[0] == NULL) || (token[1] == NULL) )
+        return -1;
+
+    outdata[ptr++] = atoi(token[0]);
+    outdata[ptr++] = atoi(token[1]) & 0xff;
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_ib_goto( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int i;
+    int ptr;
+    char *token;
+    uint8 fields = 0;
+    int val;
+    int nr_arg = 0;
+    int digit = 0;
+
+    ptr = *out_ptr;
+
+    // get cmd ID
+    token = strtok( chunk, " ," );
+    if ( token == NULL )
+        return -1;
+    outdata[ptr++] = atoi(token);       // cmdID
+
+    // get fields
+    token = strtok( NULL, " ," );
+    if ( token == NULL )
+        return -1;
+    for (i=0; i<strlen(token); i++ )
+    {
+        switch ( token[i] )
+        {
+            case 'x':   fields |= 0x01; break;
+            case 'y':   fields |= 0x02; break;
+            case 'z':   fields |= 0x04; break;
+            case 'a':   fields |= 0x08; break;
+            case 'f':   fields |= 0x10; break;
+            default:    return -1;
+        }
+        nr_arg++;
+    }
+    outdata[ptr++] = fields;
+
+    // get arguments
+    for (i=0; i<nr_arg; i++)
+    {
+        token = strtok( NULL, " ," );
+        if ( token == NULL )
+            return -1;
+        val = atoi(token);
+
+        if ( (fields & 0x10) && (i == (nr_arg -1) ))    // last argument, and it is the feed rate
+            break;
+
+        if ( (digit & 0x01) )
+        {
+            outdata[ptr++] |= ((val >> 16) & 0x0f);
+            outdata[ptr++] = ((val >> 8) & 0xff);
+            outdata[ptr++] = ((val >> 0) & 0xff);
+        }
+        else
+        {
+            outdata[ptr++] = ((val >> 12) & 0xff);
+            outdata[ptr++] = ((val >> 4)  & 0xff);
+            outdata[ptr]   = ((val << 4)  & 0xf0);
+        }
+
+        digit++;
+        val = -1;
+    }
+
+    if ( (digit & 0x01) )
+        ptr++;
+
+    if ( val != -1 )        // means that the loop before broken because of feed rate parameter
+    {
+        outdata[ptr++] = ((val >> 8) & 0xff);
+        outdata[ptr++] = ((val >> 0) & 0xff);
+    }
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+
+int local_parse_ib_drill( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int i;
+    int ptr;
+    char *token;
+    uint8 fields = 0;
+    int values[15];
+    int nr_arg = 0;
+    int digit = 0;
+
+    ptr = *out_ptr;
+
+    // get cmd ID
+    token = strtok( chunk, " ," );
+    if ( token == NULL )
+        return -1;
+    outdata[ptr++] = atoi(token);       // cmdID
+
+    // get parameters
+    token = strtok( NULL, " ," );
+    for ( i=0; i<7; i++ )
+    {
+        if ( token == NULL )
+            return -1;
+        values[i] = atoi(token);
+        token = strtok( NULL, " ," );
+    }
+
+    // x:  [xxxx xxxx][xxxx xxxx][xxxx 0000]    high bit to low bit
+    outdata[ptr++] = ((values[0] >> 12) & 0xff);
+    outdata[ptr++] = ((values[0] >> 4)  & 0xff);
+    // y:  [0000 yyyy][yyyy yyyy][yyyy yyyy]   
+    outdata[ptr++] = ((values[0] << 4)  & 0xf0) | ((values[1] >> 16) & 0x0f);
+    outdata[ptr++] = ((values[1] >> 8) & 0xff);
+    outdata[ptr++] = ((values[1] >> 0) & 0xff);
+    // z:  [zzzz zzzz][zzzz zzzz][zzzz 0000]
+    outdata[ptr++] = ((values[2] >> 12) & 0xff);
+    outdata[ptr++] = ((values[2] >> 4)  & 0xff);
+    // Z:  [0000 ZZZZ][ZZZZ ZZZZ][ZZZZ ZZZZ]   
+    outdata[ptr++] = ((values[2] << 4)  & 0xf0) | ((values[3] >> 16) & 0x0f);
+    outdata[ptr++] = ((values[3] >> 8) & 0xff);
+    outdata[ptr++] = ((values[3] >> 0) & 0xff);
+    // n:
+    outdata[ptr++] = ((values[4] >> 0) & 0xff);
+    // f:   [ffff ffff][ffff 0000]
+    outdata[ptr++] = ((values[5] >> 4) & 0xff);
+    // c:  [0000 cccc][cccc cccc]
+    outdata[ptr++] = ((values[5] << 4) & 0xf0) | ((values[6] >> 8) & 0x0f);
+    outdata[ptr++] = ((values[6] >> 0) & 0xff);
+
+    *out_ptr = ptr;
+    return 0;
+}
+
+
+
+int mainw::HW_wrp_input_line(QString line)
+{
+    QByteArray b;
+    char *indata;
+    int in_ptr;
+    uint8 outdata[256];
+    int out_ptr = 0;
+    uint8 cmd_type;
+    char token[256];
+    char *subtok;
+    int cmd_poz = 0;
+    int cmd_blk = 0;
+
+    b = line.toLatin1();
+    indata = b.data();
+
+    in_ptr = local_tokenize_msg( indata, token );
+    if ( in_ptr <=0 )
+        return 0;
+
+    while ( 1 )
+    {
+        if ( token[0] == '#' )
+            return 0;
+        if ( (token[0] != '[') || (strlen(token) < 2 ) )
+            return -1;
+
+        switch ( token[1] )
+        {
+            case 'H':
+                outdata[out_ptr++] = 0xAA;
+                break;
+            case 'C':
+                if ( strlen(token) != 7 )
+                    return -1;
+
+                if ( strncmp(token+3, "rest", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_RESET;
+                else if ( strncmp(token+3, "stmt", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_SETUP_MAX_TRAVEL;
+                else if ( strncmp(token+3, "stms", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_SETUP_MAX_SPEEDS;
+                else if ( strncmp(token+3, "sthm", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_SETUP_HOME_POZ;
+                else if ( strncmp(token+3, "stpp", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_SETUP_PROBE_POZ;
+                else if ( strncmp(token+3, "forg", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_FIND_ORIGIN;
+                else if ( strncmp(token+3, "home", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_GO_HOME;
+                else if ( strncmp(token+3, "fzzr", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_FIND_Z_ZERO;
+                else if ( strncmp(token+3, "step", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_STEP;
+                else if ( strncmp(token+3, "STRT", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_START;
+                else if ( strncmp(token+3, "PAUS", 4 ) == 0 )
+                    cmd_type = CMD_OB_PAUSE;
+                else if ( strncmp(token+3, "STOP", 4 ) == 0 )
+                    cmd_type = CMD_OB_STOP;
+                else if ( strncmp(token+3, "scfd", 4 ) == 0 )
+                    cmd_type = CMD_OB_SCALE_FEED;
+                else if ( strncmp(token+3, "scsp", 4 ) == 0 )
+                    cmd_type = CMD_OB_SCALE_SPINDLE;
+                else if ( strncmp(token+3, "gcrd", 4 ) == 0 )
+                    cmd_type = CMD_OB_GET_CRT_COORD;
+                else if ( strncmp(token+3, "gcmd", 4 ) == 0 )
+                    cmd_type = CMD_OB_GET_CRT_CMD_ID;
+                else if ( strncmp(token+3, "gsts", 4 ) == 0 )
+                    cmd_type = CMD_OB_GET_STATUS;
+                else if ( strncmp(token+3, "gthc", 4 ) == 0 )
+                    cmd_type = CMD_OB_GET_PROBE_TOUCH;
+                else if ( strncmp(token+3, "iblk", 4 ) == 0 )
+                    cmd_type = CMD_IB_BULK;
+                else if ( strncmp(token+3, "isps", 4 ) == 0 )
+                    cmd_type = CMD_IB_SPINDLE;
+                else if ( strncmp(token+3, "iwai", 4 ) == 0 )
+                    cmd_type = CMD_IB_WAIT;
+                else if ( strncmp(token+3, "igoo", 4 ) == 0 )
+                    cmd_type = CMD_IB_GOTO;
+                else if ( strncmp(token+3, "idrl", 4 ) == 0 )
+                    cmd_type = CMD_IB_DRILL;
+                else
+                    return -1;
+
+                cmd_poz = out_ptr;
+                outdata[out_ptr++] = cmd_type;
+                if ( cmd_type == CMD_IB_BULK )
+                {
+                    cmd_blk = out_ptr-1;
+                    out_ptr ++;
+                }
+                break;
+
+            case 'P':
+                {
+                    int p_len = 0;
+
+                    if ( token[2] != '_' )
+                        return -1;
+                    if ( strlen(token) < 4 )
+                        return -1;
+    
+                    switch ( cmd_type )
+                    {
+                        case CMD_OBSA_SETUP_MAX_TRAVEL:                     // [H] [C_stmt][P_1000,2000,3000,4000] [S]   #test
+                        case CMD_OBSA_SETUP_HOME_POZ:
+                            if ( local_parse_max_travel( token+3, outdata + out_ptr + 1, &p_len ) )
+                                return -1;
+                            break;
+                        case CMD_OBSA_SETUP_MAX_SPEEDS:                     // [H][C_stms][P_1500,900][S]
+                            if ( local_parse_max_speed( token+3, outdata + out_ptr + 1, &p_len ) )
+                                return -1;
+                            break;
+                        case CMD_OBSA_SETUP_PROBE_POZ:                      // [H][C_stpp][P_3000,4000][S]
+                            if ( local_parse_probe_poz( token+3, outdata + out_ptr + 1, &p_len ) )
+                                return -1;
+                            break;
+                        case CMD_OBSA_STEP:                                 // [H][C_step][P_xza,--+][S]
+                            if ( local_parse_step( token+3, outdata + out_ptr + 1, &p_len ) )
+                                return -1;
+                            break;
+                        case CMD_OB_SCALE_FEED:                             // [H][C_scfd][P_-150][S]
+                        case CMD_OB_SCALE_SPINDLE:                          // [H][C_scsp][P_120][S]
+                            if ( local_parse_scale( token+3, outdata + out_ptr + 1, &p_len ) )
+                                return -1;
+                            break;
+                        case CMD_OB_GET_CRT_COORD:                                                       // [H][C_gcrd][S]
+                            if ( local_parse_ctr_coord( token+3, outdata + out_ptr + 1, &p_len ) )       // [H][C_gcrd][1][S]
+                                return -1;
+                            break;
+                        case CMD_IB_SPINDLE:                                // [H][C_isps][P_13,20000][S]
+                            if ( local_parse_ib_spindle( token+3, outdata + out_ptr + 1, &p_len ) )      
+                                return -1;
+                            break;
+                        case CMD_IB_WAIT:                                   // [H][C_iwai][P_14,200][S]
+                            if ( local_parse_ib_wait( token+3, outdata + out_ptr + 1, &p_len ) ) 
+                                return -1;
+                            break;
+                        case CMD_IB_GOTO:                                   // [H][C_igoo][P_1,xyzf,8,9,10,11][S]
+                            if ( local_parse_ib_goto( token+3, outdata + out_ptr + 1, &p_len ) )     
+                                return -1;
+                            break;
+                        case CMD_IB_DRILL:                                  // [H][C_idrl][P_15,1000,2000,3000,3200,5,350,32][S]
+                            if ( local_parse_ib_drill( token+3, outdata + out_ptr + 1, &p_len ) ) 
+                                return -1;
+                            break;
+                    }
+
+                    if ( cmd_poz )
+                        outdata[cmd_poz] |= 0x80;
+                    outdata[out_ptr] = p_len;
+                    out_ptr += p_len + 1;
+                }
+                break;
+            case 'S':
+                {
+                    uint8 cksum;
+                    int i;
+                    cksum = (uint8)(COMMCKSUMSTART);
+                    for (i=0; i<out_ptr; i++)
+                    {
+                        cksum += outdata[i];
+                    }
+                    outdata[out_ptr++] = cksum;
+                }
+                break;
+        }
+
+        indata += in_ptr;
+        in_ptr = local_tokenize_msg( indata, token );
+        if ( in_ptr <=0 )
+            break;
+    }
+
+    // outdata, out_ptr - are ready to be used
+
+    // insert the message
+    {
+        QTextCharFormat format;
+        QString msg;
+        QTextCursor tc(doc_comm_log);
+        bool move_to_bottom = false;
+        QScrollBar *sb;
+        int ptr = 0;
+        char str[10];
+
+        sb = ui->txt_comm_window->verticalScrollBar();
+        if ( sb->value() == sb->maximum() )
+            move_to_bottom = true;
+
+        // insert the new message
+        tc.movePosition( QTextCursor::End );
+        tc.setCharFormat( format );
+
+        msg.append( tr("\n") + tr("S> ") );
+        for ( ptr = 0; ptr < out_ptr; ptr++ )
+        {
+            if ( ((ptr % 8) == 0) && (ptr != 0) && (ptr % 16) )
+                sprintf( str, "| %02x ", outdata[ptr]);
+            else
+                sprintf( str, "%02x ", outdata[ptr]);
+
+            if ( (ptr != 0) && ((ptr % 16) == 0) )
+                msg.append( tr("\n") + tr("   ")  );
+            msg.append( str );
+        }
+
+        tc.insertText( msg );
+
+        // if scroll was at the end of log display then scroll to the end of the new line also
+        if ( move_to_bottom )
+            sb->triggerAction(QScrollBar::SliderToMaximum);
+
+    }
+
+
+    return 0;
+}
+
+
 /////////////////////////////////////////////////////
 // front end simulation
 /////////////////////////////////////////////////////
 
-const char cmd_spindle[] =  { 0xA9, 0x14 };
-const char cmd_getevents[] = { 0xAA, 0xA9 };                // has no cksum
-const char cmd_setevmask[] = { 0xA9, 0x13 };
-const char cmd_setspeed[] = { 0xA9, 0x11 };
-const char cmd_getrpm[] = { 0xA9, 0x00 };
-const char cmd_getcoord[] = { 0xAA, 0x9A };                 // no checksum here also
-const char cmd_resetcoord[] = { 0xA9, 0x05 };
+const uint8 cmd_spindle[] =  { 0xA9, 0x14 };
+const uint8 cmd_getevents[] = { 0xAA, 0xA9 };                // has no cksum
+const uint8 cmd_setevmask[] = { 0xA9, 0x13 };
+const uint8 cmd_setspeed[] = { 0xA9, 0x11 };
+const uint8 cmd_getrpm[] = { 0xA9, 0x00 };
+const uint8 cmd_getcoord[] = { 0xAA, 0x9A };                 // no checksum here also
+const uint8 cmd_resetcoord[] = { 0xA9, 0x05 };
 
 #define SSIMU_CMD_SPINDLE_PWR   1
 #define SSIMU_CMD_GET_EVENTS    2

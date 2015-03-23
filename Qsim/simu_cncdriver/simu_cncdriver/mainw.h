@@ -71,6 +71,10 @@ private slots:
 
     void on_pb_fe_spindle_jam_clicked();
 
+    void on_pb_cmd_feed_line_clicked();
+
+    void on_pb_cmd_restart_clicked();
+
 private:
     Ui::mainw *ui;
     QTimer *ticktimer;
@@ -82,6 +86,15 @@ private:
     QGraphicsPixmapItem *G_item_xy;
     uchar *gmem_xy;                    // graphic memory for display simulator
 
+    struct SCommandList
+    {
+        int crt_line;
+
+    } cmd_list;
+
+
+    QTextDocument *doc_commands;
+    QTextDocument *doc_comm_log;
 
 
 public:
@@ -112,9 +125,13 @@ private:
     void HW_wrp_feed_seq();
     void HW_wrp_stop();
     void HW_wrp_set_speedFactor( int factor );
-    void HW_wrp_spindle_jam(void);
 
+    int HW_wrp_input_line(QString line);
+
+
+    void HW_wrp_spindle_jam(void);
     void HW_wrp_front_end_simu();
+
 };
 
 #endif // MAINW_H
