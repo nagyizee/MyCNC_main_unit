@@ -129,6 +129,9 @@ void mainw::TimerTick()
 
         if ( i % 0x01 )
             HW_wrp_front_end_simu();        // 25khz rate  ~235kbps
+        if ( i % 5 )                        // 10khz rate  - close to 11kbps
+            HW_wrp_simu_datafeed();
+
     }
 
     if ( ctdown == 0 )
@@ -283,16 +286,18 @@ void mainw::on_pb_cmd_feed_line_clicked()
     QTextBlock tb;
     QTextCharFormat format;
     QString line;
+    int res;
 
     tb = doc_commands->findBlockByNumber( cmd_list.crt_line );
     QTextCursor tc( doc_commands->findBlockByNumber( cmd_list.crt_line ) );
     line = tb.text();
 
-    if (HW_wrp_input_line( line ))
+    res = HW_wrp_input_line( line );
+    if (res == -1)
     {
         format.setForeground( Qt::red );
     }
-    else
+    else if ( res == 0 )
     {
         format.setForeground( Qt::lightGray );
         cmd_list.crt_line++;

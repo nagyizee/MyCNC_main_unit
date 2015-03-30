@@ -106,7 +106,7 @@
                                                     //          [PEN] - if another is in execution
                                                     //          [INV] - if sequencer is running / invalid data received
 
-    #define CMD_OBSA_SETUP_HOME_POZ         0x03    // set the home/tool change pozition. Default is 130:46:80.
+    #define CMD_OBSA_SETUP_HOME_POZ         0x03    // set the home/tool change pozition. Default is what is set for max travel.
                                                     // IN:      [0xAA][0x83][0x0a][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted
                                                     //          [PEN] - if another is in execution

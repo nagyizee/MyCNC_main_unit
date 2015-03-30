@@ -259,7 +259,7 @@ static inline int internal_pc_goto( uint8 *buffer, uint32 plen, struct ScmdIfCom
     if ( elem_poz & 0x01 )      // do not leave half byte - last bits are always 0000 if not used
         elem_poz++;
 
-    if ( fields & 0x40 )        // check for feed speed definition
+    if ( fields & 0x10 )        // check for feed speed definition
     {
         int ptr;
         ptr = (elem_poz >> 1);
@@ -660,7 +660,7 @@ void cmdif_poll( struct SEventStruct *evt )
 
                         if ( byte & 0x80 )
                         {
-                            comm.p_len = (uint32)(-1);
+                            comm.p_len = (uint16)(-1);
                             comm.state = CSTATE_GET_PAYLOAD;
                         }
                         else
@@ -671,7 +671,7 @@ void cmdif_poll( struct SEventStruct *evt )
                     break;
                 case CSTATE_GET_PAYLOAD:
                     {
-                        if ( comm.p_len == (uint32)(-1) )       // Get the payload lenght   
+                        if ( comm.p_len == (uint16)(-1) )       // Get the payload lenght
                         {
                             uint32 byte;
                             byte = comm_rdChar();

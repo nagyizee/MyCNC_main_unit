@@ -38,7 +38,6 @@
         uint32  fe_op_failed:1;             // flag set by front_end_poll when an operation is failed ( set together with fe_op_completed )
 
         uint32  comm_command_ready:1;       // if a new command is available
-        uint32  comm_command_bulk:1;        // if a bulk command is received
         uint32  comm_input_overflow:1;      // input queue overflowed
         uint32  comm_timeout:1;             // communication timeout detected
 

@@ -126,7 +126,9 @@ private:
     void HW_wrp_stop();
     void HW_wrp_set_speedFactor( int factor );
 
+    int HW_wrp_insert_message( unsigned char *buffer, int size, bool tx );
     int HW_wrp_input_line(QString line);
+    int HW_wrp_simu_datafeed();
 
 
     void HW_wrp_spindle_jam(void);

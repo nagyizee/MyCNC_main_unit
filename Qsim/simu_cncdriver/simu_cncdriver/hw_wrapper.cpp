@@ -566,39 +566,136 @@ bool mainw::HW_wrp_fe_broken_link()
 // Master unit comm. simulation
 /////////////////////////////////////////////////////
 
+#define SIMU_MAX_RX_BUFF_SIZE   1024
+
+
+struct SCommFifo
+{
+    uint8 buff[ SIMU_MAX_RX_BUFF_SIZE ];
+    int r;
+    int w;
+    int c;
+
+};
+
+
+struct SSimuCommRx
+{
+    struct SCommFifo simu_feed;
+    struct SCommFifo rx;
+    uint8 resp[SIMU_MAX_RX_BUFF_SIZE];
+    int resp_ct;
+} comm_rx = {0, };
+
+
+int fifo_push( struct SCommFifo *fifo, uint8 data )
+{
+    if ( fifo->c >= SIMU_MAX_RX_BUFF_SIZE )
+        return -1;
+    fifo->buff[ fifo->w++ ]= data;
+    fifo->w %= SIMU_MAX_RX_BUFF_SIZE;
+    fifo->c ++;
+    return 0;
+}
+
+int fifo_push_bulk( struct SCommFifo *fifo, uint8 *data, int size )
+{
+    int size_1 = size;
+
+    if ( fifo->c + size >= SIMU_MAX_RX_BUFF_SIZE )
+        return -1;
+
+    fifo->c += size;
+    if ( size + fifo->w > SIMU_MAX_RX_BUFF_SIZE )
+        size_1 = SIMU_MAX_RX_BUFF_SIZE - fifo->w;
+    size -= size_1;
+    
+    memcpy( fifo->buff + fifo->w, data, size_1 );
+    memcpy( fifo->buff, data + size_1, size );
+
+    fifo->w += size_1 + size;
+    fifo->w %= SIMU_MAX_RX_BUFF_SIZE;
+    return 0;
+}
+
+uint8 fifo_pull( struct SCommFifo *fifo )
+{
+    uint8 data;
+    if ( fifo->c == 0 )
+        return -1;
+    data = fifo->buff[ fifo->r++ ];
+    fifo->r %= SIMU_MAX_RX_BUFF_SIZE;
+    fifo->c --;
+    return data;
+
+}
+
+void fifo_flush( struct SCommFifo *fifo )
+{
+    fifo->c = 0;
+    fifo->r = 0;
+    fifo->w = 0;
+}
+
+int fifo_free_space( struct SCommFifo *fifo )
+{
+    return (SIMU_MAX_RX_BUFF_SIZE - fifo->c);
+}
+
+int fifo_data_size( struct SCommFifo *fifo )
+{
+    return fifo->c;
+}
+
+
+
+static bool ovf = false;
 
 uint32 comm_cmd_poll(void)
 {
+    if ( (fifo_free_space( &comm_rx.rx ) == 0) && (ovf == false) ) 
+    {
+        ovf = true;
+        return COMFLAG_OVERFLOW;
+    }
+    if ( fifo_free_space( &comm_rx.rx ) )
+    {
+        ovf = false;
+    }
 
-    return 0;
+    return COMFLAG_OK;
 }
 
 void comm_cmd_InFlush(void)
 {
-
+    fifo_flush( &comm_rx.rx );
+    ovf = false;
 }
 
 uint32 comm_cmd_GetInLength(void)
 {
-
-    return 0;
+    return fifo_data_size( &comm_rx.rx );
 }
 
 uint32 comm_cmd_GetOutFree(void)
 {
-
-    return 0;
+    return SIMU_MAX_RX_BUFF_SIZE - comm_rx.resp_ct;
 }
 
 uint32 comm_rdChar(void)
 {
-
-    return 0;
+    uint8 data;
+    if ( fifo_data_size( &comm_rx.rx ) == 0 )
+        return -1;
+    data = fifo_pull( &comm_rx.rx );
+    return data;
 }
 
 uint32 comm_wrChar( uint8 byte )
 {
-
+    if ( comm_rx.resp_ct >= SIMU_MAX_RX_BUFF_SIZE )
+        return -1;
+    comm_rx.resp[ comm_rx.resp_ct++ ] = byte;
     return 0;
 }
 
@@ -1007,6 +1104,55 @@ int local_parse_ib_drill( char *chunk, uint8 *outdata, int *out_ptr )
 }
 
 
+int mainw::HW_wrp_insert_message( unsigned char *buffer, int size, bool from_master )
+{
+    QTextCharFormat format;
+    QString msg;
+    QTextCursor tc(doc_comm_log);
+    bool move_to_bottom = false;
+    QScrollBar *sb;
+    int ptr = 0;
+    char str[10];
+
+    sb = ui->txt_comm_window->verticalScrollBar();
+    if ( sb->value() == sb->maximum() )
+        move_to_bottom = true;
+
+    if ( from_master)
+    {
+        format.setForeground( Qt::red );
+        msg.append( tr("\n") + tr("S> ") );
+    }
+    else
+    {
+        format.setForeground( Qt::darkGreen );
+        msg.append( tr("\n") + tr("R< ") );
+    }
+
+    // insert the new message
+    tc.movePosition( QTextCursor::End );
+    tc.setCharFormat( format );
+
+    for ( ptr = 0; ptr < size; ptr++ )
+    {
+        if ( ((ptr % 8) == 0) && (ptr != 0) && (ptr % 16) )
+            sprintf( str, "| %02x ", buffer[ptr]);
+        else
+            sprintf( str, "%02x ", buffer[ptr]);
+
+        if ( (ptr != 0) && ((ptr % 16) == 0) )
+            msg.append( tr("\n") + tr("   ")  );
+        msg.append( str );
+    }
+
+    tc.insertText( msg );
+
+    // if scroll was at the end of log display then scroll to the end of the new line also
+    if ( move_to_bottom )
+        sb->triggerAction(QScrollBar::SliderToMaximum);
+
+}
+
 
 int mainw::HW_wrp_input_line(QString line)
 {
@@ -1081,7 +1227,7 @@ int mainw::HW_wrp_input_line(QString line)
                 else if ( strncmp(token+3, "gthc", 4 ) == 0 )
                     cmd_type = CMD_OB_GET_PROBE_TOUCH;
                 else if ( strncmp(token+3, "iblk", 4 ) == 0 )
-                    cmd_type = CMD_IB_BULK;
+                    cmd_type = CMD_IB_BULK | 0x80;
                 else if ( strncmp(token+3, "isps", 4 ) == 0 )
                     cmd_type = CMD_IB_SPINDLE;
                 else if ( strncmp(token+3, "iwai", 4 ) == 0 )
@@ -1095,9 +1241,9 @@ int mainw::HW_wrp_input_line(QString line)
 
                 cmd_poz = out_ptr;
                 outdata[out_ptr++] = cmd_type;
-                if ( cmd_type == CMD_IB_BULK )
+                if ( cmd_type == (CMD_IB_BULK | 0x80) )
                 {
-                    cmd_blk = out_ptr-1;
+                    cmd_blk = out_ptr;
                     out_ptr ++;
                 }
                 break;
@@ -1167,6 +1313,12 @@ int mainw::HW_wrp_input_line(QString line)
                 {
                     uint8 cksum;
                     int i;
+
+                    if ( cmd_blk )
+                    {
+                        outdata[cmd_blk]= out_ptr - cmd_blk;
+                    }
+
                     cksum = (uint8)(COMMCKSUMSTART);
                     for (i=0; i<out_ptr; i++)
                     {
@@ -1184,49 +1336,36 @@ int mainw::HW_wrp_input_line(QString line)
     }
 
     // outdata, out_ptr - are ready to be used
+    if ( fifo_free_space( &comm_rx.simu_feed ) < out_ptr )
+        return -2;
+    fifo_push_bulk( &comm_rx.simu_feed, outdata, out_ptr );
 
     // insert the message
+    HW_wrp_insert_message( outdata, out_ptr, true );
+    return 0;
+}
+
+
+int mainw::HW_wrp_simu_datafeed()
+{
+    // simulate serial transfer
+    if ( fifo_free_space( &comm_rx.rx ) && fifo_data_size( &comm_rx.simu_feed ) )
     {
-        QTextCharFormat format;
-        QString msg;
-        QTextCursor tc(doc_comm_log);
-        bool move_to_bottom = false;
-        QScrollBar *sb;
-        int ptr = 0;
-        char str[10];
-
-        sb = ui->txt_comm_window->verticalScrollBar();
-        if ( sb->value() == sb->maximum() )
-            move_to_bottom = true;
-
-        // insert the new message
-        tc.movePosition( QTextCursor::End );
-        tc.setCharFormat( format );
-
-        msg.append( tr("\n") + tr("S> ") );
-        for ( ptr = 0; ptr < out_ptr; ptr++ )
-        {
-            if ( ((ptr % 8) == 0) && (ptr != 0) && (ptr % 16) )
-                sprintf( str, "| %02x ", outdata[ptr]);
-            else
-                sprintf( str, "%02x ", outdata[ptr]);
-
-            if ( (ptr != 0) && ((ptr % 16) == 0) )
-                msg.append( tr("\n") + tr("   ")  );
-            msg.append( str );
-        }
-
-        tc.insertText( msg );
-
-        // if scroll was at the end of log display then scroll to the end of the new line also
-        if ( move_to_bottom )
-            sb->triggerAction(QScrollBar::SliderToMaximum);
-
+        uint8 data;
+        data = fifo_pull( &comm_rx.simu_feed );
+        fifo_push( &comm_rx.rx, data );
     }
 
+    // get response
+    if ( comm_rx.resp_ct )
+    {
+        HW_wrp_insert_message( comm_rx.resp, comm_rx.resp_ct, false );
+        comm_rx.resp_ct = 0;
+    }
 
     return 0;
 }
+
 
 
 /////////////////////////////////////////////////////

@@ -49,7 +49,19 @@ void seq_callback_process_inband( uint32 seqType, uint32 value )
 }
 
 
+void local_sequencer_process_command( void )
+{
+    struct ScmdIfCommand cmd;
+    struct ScmdIfResponse resp;
+    int res;
 
+    res = cmdif_get_command( &cmd );
+
+    resp.cmd_type = cmd.cmd_type;
+    resp.resp_type = RESP_ACK;
+    cmdif_confirm_reception( &resp );
+
+}
 
 /* *************************************************
  *
@@ -65,6 +77,7 @@ void sequencer_init()
     motion_init();
     if ( front_end_init() == 0 )
         cnc.setup.fe_present = true;
+    cmdif_init();
 
     // init motion core 
     struct SStepCoordinates origin;
@@ -89,8 +102,12 @@ void sequencer_init()
 void sequencer_poll( struct SEventStruct *evt )
 {
     front_end_poll(evt);
-
-
+    cmdif_poll(evt);
+    if ( evt->comm_command_ready )
+    {
+        local_sequencer_process_command();
+    }
+    
 
     motion_poll(evt);
 }
