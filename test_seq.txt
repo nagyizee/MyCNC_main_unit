@@ -1,0 +1,47 @@
+
+#init system
+[H][C_stmt][P_52000,18400,32000,0][S]
+[H][C_stms][P_1500,1000][S]
+
+
+#outband commands
+[H][C_rest][S]
+[H][C_stmt][P_52000,18400,32000,0][S]
+[H][C_stms][P_1500,1000][S]
+[H][C_sthm][P_52000,18400,32000,0][S]
+[H][C_stpp][P_12000,10000][S]
+[H][C_scfd][P_-150][S]
+[H][C_gcrd][S]
+[H][C_gcrd][P_1][S]
+      
+
+
+
+
+#bulk inbands
+[H][C_iblk][C_isps][P_1,20000][C_igoo][P_2,xyf,1000,500,350][C_igoo][P_3,z,800][S]
+
+#simple inbands
+[H][C_igoo][P_2,xyf,32000,10000,350][S]
+[H][C_igoo][P_2,z,25000][S]
+[H][C_igoo][P_2,xz,25000,8000][S]
+[H][C_igoo][P_2,f,400][S]
+[H][C_igoo][P_2,xyza,12000,10000,8000,300][S]
+[H][C_igoo][P_2,xyzaf,12000,10000,8000,300,450][S]
+[H][C_igoo][P_2,xzaf,500,7000,3000,1500][S]
+[H][C_iwai][P_14,200][S]
+[H][C_isps][P_13,20000][S]
+[H][C_idrl][P_15,1000,2000,3000,3200,5,350,32][S]
+
+
+
+
+
+
+[H][C_stms][P_1500,900][S]
+[H][C_scsp][P_120][S]
+[H][C_igoo][P_1,xyzf,8,9,10,11][S]
+
+
+
+

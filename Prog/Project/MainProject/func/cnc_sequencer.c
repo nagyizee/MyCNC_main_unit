@@ -56,6 +56,15 @@ void local_sequencer_process_command( void )
     int res;
 
     res = cmdif_get_command( &cmd );
+    if ( res == -2 )        // if bulk command
+    {
+        do
+        {
+            res = cmdif_get_bulk( &cmd );
+
+        } while ( res == 0 );
+
+    }
 
     resp.cmd_type = cmd.cmd_type;
     resp.resp_type = RESP_ACK;

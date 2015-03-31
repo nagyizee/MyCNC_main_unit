@@ -143,6 +143,7 @@ static inline int internal_pc_setup_max_speed( struct ScmdIfCommand *command )
     // IN:      [0xAA][0x82][0x04] - [mmmm mmmm][mmmm mmmm][rrrr rrrr][rrrr rrrr] - [cksum]
     command->cmd.max_speeds.absolute = (comm_buffer[0]<<8) | (comm_buffer[1]);
     command->cmd.max_speeds.rapid = (comm_buffer[2]<<8) | (comm_buffer[3]);
+    return 0;
 }
 
 static inline int internal_pc_setup_home_poz( struct ScmdIfCommand *command )
@@ -178,7 +179,7 @@ static int internal_pc_getscale( int32 *value )
 {
     // [0xAA][0xA4][0x02][ssss ssss][ssss ssss][cksum]
     int16 *val_ptr;
-    val_ptr = (int16)(comm_buffer);
+    val_ptr = (int16*)(comm_buffer);
     *value = *val_ptr;
     return 0;
 }
@@ -203,8 +204,8 @@ static inline int internal_pc_spindle( uint8 *buffer, struct ScmdIfCommand *comm
     //                0        1          2
     // [0xC1][0x03][cmdID][rrrr rrrr][rrrr rrrr]
     command->cmd_inband = 1;
-    command->cmdID = comm_buffer[0];
-    command->cmd.ib_spindle_speed = (comm_buffer[1]<<8) | (comm_buffer[2]);
+    command->cmdID = buffer[0];
+    command->cmd.ib_spindle_speed = (buffer[1]<<8) | (buffer[2]);
     return 0;
 }
 
@@ -213,8 +214,8 @@ static inline int internal_pc_wait( uint8 *buffer, struct ScmdIfCommand *command
     //                0        1
     // [0xC2][0x02][cmdID][hhhh hhhh]
     command->cmd_inband = 1;
-    command->cmdID = comm_buffer[0];
-    command->cmd.ib_wait = comm_buffer[1];
+    command->cmdID = buffer[0];
+    command->cmd.ib_wait = buffer[1];
     return 0;
 }
 
@@ -232,10 +233,10 @@ static inline int internal_pc_goto( uint8 *buffer, uint32 plen, struct ScmdIfCom
     int elem_poz = 0;           // considers 4 bit packets
     uint32 fields;
 
-    fields = comm_buffer[1];
+    fields = buffer[1];
 
     command->cmd_inband = 1;
-    command->cmdID = comm_buffer[0];
+    command->cmdID = buffer[0];
     command->cmd.ib_goto.valid_fields = fields;
 
     for ( coord_ptr = 0; coord_ptr < CNC_MAX_COORDS; coord_ptr++ )
@@ -243,12 +244,12 @@ static inline int internal_pc_goto( uint8 *buffer, uint32 plen, struct ScmdIfCom
         if ( fields & ( 1 << coord_ptr ) )      // if we have this coordinate defined
         {
             int ptr;
-            ptr = (elem_poz >> 1);
+            ptr = (elem_poz >> 1) + 2;
 
             if ( (elem_poz & 0x01) == 0 )       // means that number begins with whole byte. like [xxxx xxxx]
-                command->cmd.home_poz.coord[coord_ptr] = (comm_buffer[ptr] << 12) | (comm_buffer[ptr+1] << 4) | (comm_buffer[ptr+2] >> 4);
+                command->cmd.home_poz.coord[coord_ptr] = (buffer[ptr] << 12) | (buffer[ptr+1] << 4) | (buffer[ptr+2] >> 4);
             else                                // else it begins with half byte. like [.... yyyy][yyyy yyyy]
-                command->cmd.home_poz.coord[coord_ptr] = ( (comm_buffer[ptr] & 0x0f) << 16) | (comm_buffer[ptr+1]<<8) | (comm_buffer[ptr+2]);
+                command->cmd.home_poz.coord[coord_ptr] = ( (buffer[ptr] & 0x0f) << 16) | (buffer[ptr+1]<<8) | (buffer[ptr+2]);
 
             elem_poz += 5;
         }
@@ -262,12 +263,12 @@ static inline int internal_pc_goto( uint8 *buffer, uint32 plen, struct ScmdIfCom
     if ( fields & 0x10 )        // check for feed speed definition
     {
         int ptr;
-        ptr = (elem_poz >> 1);
-        command->cmd.ib_goto.feed = (comm_buffer[ptr]<<8) | (comm_buffer[ptr+1]);
-        fields += 4;
+        ptr = (elem_poz >> 1) + 2;
+        command->cmd.ib_goto.feed = (buffer[ptr]<<8) | (buffer[ptr+1]);
+        elem_poz += 4;
     }
 
-    if ( (fields >> 1) != plen )    // check if the parsed buffer is valid - payload lenght should be equal with calculation
+    if ( ((elem_poz >> 1) + 2) != plen )    // check if the parsed buffer is valid - payload lenght should be equal with calculation
         return -3;
     return 0;
 }
@@ -284,15 +285,15 @@ static inline internal_pc_drill( uint8 *buffer, struct ScmdIfCommand *command )
     //          ccc      - clearence distance from the top of the hole (zzz)
 
     command->cmd_inband = 1;
-    command->cmdID = comm_buffer[0];
+    command->cmdID = buffer[0];
 
-    command->cmd.ib_drill.coord.coord[COORD_X] = (comm_buffer[1] << 12) | (comm_buffer[2] << 4) | (comm_buffer[3] >> 4);
-    command->cmd.ib_drill.coord.coord[COORD_Y] = ( (comm_buffer[3] & 0x0f) << 16) | (comm_buffer[4]<<8) | (comm_buffer[5]);
-    command->cmd.ib_drill.coord.coord[COORD_Z] = (comm_buffer[6] << 12) | (comm_buffer[7] << 4) | (comm_buffer[8] >> 4);
-    command->cmd.ib_drill.coord.coord[COORD_A] = ( (comm_buffer[8] & 0x0f) << 16) | (comm_buffer[9]<<8) | (comm_buffer[10]);
-    command->cmd.ib_drill.cycles = comm_buffer[11];
-    command->cmd.ib_drill.feed = (comm_buffer[12] << 4) | (comm_buffer[13] >> 4);
-    command->cmd.ib_drill.clearance = ( (comm_buffer[13] & 0x0f) << 8) | (comm_buffer[14]);
+    command->cmd.ib_drill.coord.coord[COORD_X] = (buffer[1] << 12) | (buffer[2] << 4) | (buffer[3] >> 4);
+    command->cmd.ib_drill.coord.coord[COORD_Y] = ( (buffer[3] & 0x0f) << 16) | (buffer[4]<<8) | (buffer[5]);
+    command->cmd.ib_drill.coord.coord[COORD_Z] = (buffer[6] << 12) | (buffer[7] << 4) | (buffer[8] >> 4);
+    command->cmd.ib_drill.coord.coord[COORD_A] = ( (buffer[8] & 0x0f) << 16) | (buffer[9]<<8) | (buffer[10]);
+    command->cmd.ib_drill.cycles = buffer[11];
+    command->cmd.ib_drill.feed = (buffer[12] << 4) | (buffer[13] >> 4);
+    command->cmd.ib_drill.clearance = ( (buffer[13] & 0x0f) << 8) | (buffer[14]);
     return 0;
 }
 

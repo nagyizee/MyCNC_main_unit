@@ -1282,7 +1282,7 @@ int mainw::HW_wrp_input_line(QString line)
                                 return -1;
                             break;
                         case CMD_OB_GET_CRT_COORD:                                                       // [H][C_gcrd][S]
-                            if ( local_parse_ctr_coord( token+3, outdata + out_ptr + 1, &p_len ) )       // [H][C_gcrd][1][S]
+                            if ( local_parse_ctr_coord( token+3, outdata + out_ptr + 1, &p_len ) )       // [H][C_gcrd][P_1][S]
                                 return -1;
                             break;
                         case CMD_IB_SPINDLE:                                // [H][C_isps][P_13,20000][S]
@@ -1316,7 +1316,7 @@ int mainw::HW_wrp_input_line(QString line)
 
                     if ( cmd_blk )
                     {
-                        outdata[cmd_blk]= out_ptr - cmd_blk;
+                        outdata[cmd_blk]= out_ptr - cmd_blk - 1;
                     }
 
                     cksum = (uint8)(COMMCKSUMSTART);
