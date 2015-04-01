@@ -54,6 +54,9 @@
     void motion_init( void );
 
     // Main polling loop
+    // affected event flags:
+    //  - cnc_motion_seq_fatal
+    //  - cnc_motion_warn_starving
     void motion_poll( struct SEventStruct *evt );
 
 

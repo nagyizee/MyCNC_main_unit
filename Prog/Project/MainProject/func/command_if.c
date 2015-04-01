@@ -604,6 +604,7 @@ static int internal_send_response( struct ScmdIfResponse *response )
 void cmdif_init(void)
 {
     memset( &comm, 0, sizeof(comm) );
+    comm.use_cksum = true;
 }
 
 

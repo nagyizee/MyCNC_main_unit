@@ -463,6 +463,12 @@ _error_exit:
         if ( front_end_local_event_loop() )
             goto _error_exit;
 
+        // power down the spindle assembly
+        if ( internal_command_spindle_pwr(false) )
+            goto _error_exit;
+        if ( front_end_local_event_loop() )
+            goto _error_exit;
+
         // set spindle speed 0
         if ( internal_command_set_spindle_speed(0) )
             goto _error_exit;

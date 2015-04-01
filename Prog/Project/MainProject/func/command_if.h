@@ -196,15 +196,15 @@
                                                     //         - currently executed (or stopped) cmdID 
                                                     //         - command fifo free space
                                                     // IN:      [0xAA][0x33][cksum]
-                                                    // OUT:     [ACK][0x84][GSfR rscc][cmdIDex][cmdIDq][freesp][cksum]
+                                                    // OUT:     [ACK][0x84][GiSf Rscc][cmdIDex][cmdIDq][freesp][cksum]
                                                     //              cc -  00 - no outband operation in execution, or last one succeeded
                                                     //                    01 - last outband operation failed
                                                     //                    11 - outband operation in progress
                                                     //              s  - starvation detected
-                                                    //              r  - motion core is running
                                                     //              R  - sequencer is running
                                                     //              f  - coordinate fault (missed steps) detected but can be fixed (hopefully - otherwise general failure)
                                                     //              S  - spindle stuck detected but fixed
+                                                    //              i  - initial status - marking a fresh reset
                                                     //              G  - general failure - must read error code  --- If this is set [freesp] holds the error code
                                                     //                  -- when this happens, sequencer stops and flushes everything
                                                     //                  -- main causes: unrecoverable spindle stuck / missing front-end link / unrecoverable missed step
@@ -254,7 +254,7 @@
                                                     // format:  [0xC5][0x0f][cmdID][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz ZZZZ][ZZZZ ZZZZ][ZZZZ ZZZZ][nnnn nnnn][ffff ffff][ffff cccc][cccc cccc]           
                                                     //          xxx, yyy - horizontal coordinates of the hole
                                                     //          zzz      - top level of the material from where feed is considered
-                                                    //          ZZZ      - bottom of the hole
+                                                    //          ZZZ      - depth of hole (relative to top zzz)
                                                     //          nnn      - chip removal steps ( 255 max )
                                                     //          fff      - drilling feed speed
                                                     //          ccc      - clearence distance from the top of the hole (zzz)
@@ -281,19 +281,18 @@
         bool    dmp_enable;         // enable/disable dump (valid only if is_setup = true)
     };
 
-    struct SCmdType_goto
+    struct SCmdType_goto        // size: 4x4 + 2 + 2 = 20
     {
         struct SStepCoordinates coord;
         uint16  feed;
         uint16  valid_fields;       // 000f azyx  format
     };
 
-    struct SCmdType_drill   
+    struct SCmdType_drill       // size: 4x4 + 4 + 2 + 2 = 24
     {
         struct SStepCoordinates coord;      // where A axis holds the hole bottom
-        uint8   cycles;
-        uint8   reserved;
-        uint16  clearance;
+        uint32  clearance;
+        uint16  cycles;
         uint16  feed;
     };
 
@@ -326,10 +325,10 @@
                                                     // 01 - last outband operation failed
                                                     // 11 - outband operation in progress
                 uint8 starvation:1;                 // inband fifo starved
-                uint8 run_motion:1;                 // motion core running inbands
                 uint8 run_seq:1;                    // sequencer is running inbands
                 uint8 step_fault:1;                 // missed step detected
                 uint8 spindle_fault:1;              // spindle stuck detected
+                uint8 initial:1;                    // initial status - marking a fresh reset
                 uint8 General_fault:1;              // general fault - system stopped automatically, fifos flushed - check cmdIDex and cmdIDq
             } f;
             uint8 val;
@@ -342,7 +341,7 @@
         uint32  freeSpace;                      // free space in the queue
     };
 
-    struct ScmdIfCommand
+    struct ScmdIfCommand        // size: 4 + 24 = 28 bytes
     {
         uint8   cmd_type;       // see definitions abowe
         uint8   cmdID;          // command ID for inband commands
@@ -389,7 +388,7 @@
 
 
     // get the arrived command
-    // returns 0 on success, -1 if no command, -2 if command is a bulk one - use cmdif_get_bulk() in that case
+    // returns 0 on success, -1 if no command, -2 if command is a bulk one - use cmdif_get_bulk() in that case, -3 if command is invalid
     int cmdif_get_command( struct ScmdIfCommand *command );
 
     // send response for a command. 

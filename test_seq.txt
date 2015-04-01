@@ -15,9 +15,6 @@
 [H][C_gcrd][P_1][S]
       
 
-
-
-
 #bulk inbands
 [H][C_iblk][C_isps][P_1,20000][C_igoo][P_2,xyf,1000,500,350][C_igoo][P_3,z,800][S]
 
