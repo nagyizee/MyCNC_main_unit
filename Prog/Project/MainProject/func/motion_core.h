@@ -73,8 +73,6 @@
     void motion_set_crt_coord( struct SStepCoordinates *coord );
 
     // get the current stepper coordinates
-
-
     void motion_get_crt_coord( struct SStepCoordinates *coord );
 
     // Set up endpoint values. NULL will clear them
@@ -86,7 +84,13 @@
     // routine is synchronous - works only in stopped state
     int motion_step( uint32 axis, uint32 dir );
 
+    // execute freerun on one of the axis with given feed rate
+    // motion is cancelled instantly on sequence_stop() or start() command, or gradually on freerun with feed=0
+    // routine can be executed in stop mode only.
+    // Note: axis power needs to be set up by the client layer
+    int motion_freerun( uint32 axis, bool dir, uint32 feed, bool no_lim );
 
+    
    // insert a motion sequence in the sequence fifo
     int motion_sequence_insert( struct SMotionSequence *seq );
 
@@ -104,6 +108,8 @@
     // get the current sequence ID which is in execution, or the last sequence ID which was interrupted
     uint32 motion_sequence_crt_seqID( void );
 
+    // returns 1 if step engine is actievly running a sequence or a freerun
+    uint32 motion_sequence_check_run( void );
 
     // callback prototype for externally executed inband operations 
     typedef void (*motion_sequence_callback)( uint32 seqType, uint32 value );

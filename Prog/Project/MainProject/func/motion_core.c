@@ -107,6 +107,15 @@
 // - If (a1 ^ a2) = 0   ( a1/a2 both pos/neg)
 //      D1 = i1, D2 = i2
 //      NOTE: i1 < i2 all times if the validity condition is fulfilled
+//
+// ------------------------------------------------------------
+// Freerun on independent axis:
+// 
+// api gives the step speed in steps/STEP_CLOCK calculated from the needed feed
+// speed (see details abowe).
+// Step engine goes from the previous speed or 0 and adds up or reduce with acceleration the current speed quantum
+// which is added up in fractional.
+// 
 // 
 
 #include <stdio.h>
@@ -229,6 +238,29 @@ static inline void local_isr_step_turn_channel_off( int i )
     }
 }
 
+static void local_isr_set_directions( uint32 dir )
+{
+    if ( dir & (1 << COORD_X) )
+        HW_SetDirX_Plus();
+    else
+        HW_SetDirX_Minus();
+
+    if ( dir & (1 << COORD_Y) )
+        HW_SetDirY_Plus();
+    else
+        HW_SetDirY_Minus();
+
+    if ( dir & (1 << COORD_Z) )
+        HW_SetDirZ_Plus();
+    else
+        HW_SetDirZ_Minus();
+
+    if ( dir & (1 << COORD_A) )
+        HW_SetDirA_Plus();
+    else
+        HW_SetDirA_Minus();
+}
+
 static inline void local_isr_recalculate_speeds( void )
 {
     // recalculate speeds
@@ -286,28 +318,78 @@ static inline void local_isr_recalculate_speeds( void )
     }
 }
 
-
-static void local_isr_set_directions( uint32 dir )
+static inline void local_isr_recalculate_free_speeds( int i )
 {
-    if ( dir & (1 << COORD_X) )
-        HW_SetDirX_Plus();
-    else
-        HW_SetDirX_Minus();
+    // if speed is 0 - set up direction and end limit
+    if ( isr.crt_action.p.Stp_crt[i] == 0 )
+    {
+        if ( isr.freerun.feed_target == 0 )         // if target speed is 0, we have 0 current speed - disable axis
+        {
+            isr.crt_action.channel_active &= ~(1 << i);
+            return;
+        }
 
-    if ( dir & (1 << COORD_Y) )
-        HW_SetDirY_Plus();
-    else
-        HW_SetDirY_Minus();
+        if ( isr.freerun.dir_mask & (1 << i) )      // positive dir. to be set up
+        {
+            isr.crt_action.dir_mask |= (1 << i);
+            if ( isr.freerun.no_limmit )
+                isr.crt_action.p.dest_poz.coord[i] = 0x7fffffff;                    // practically infinite positive value
+            else
+            {
+                isr.crt_action.p.dest_poz.coord[i] = isr.freerun.max_travel.coord[i];     // max travel
+                if ( isr.crt_action.p.dest_poz.coord[i] == isr.crt_poz.coord[i] )
+                {
+                    isr.crt_action.channel_active &= ~(1 << i);                     // if we are allready there - disable channel
+                    return;
+                }
+            }
+        }
+        else                                        // negative dir. to be set
+        {
+            isr.crt_action.dir_mask &= ~(1 << i);
+            if ( isr.freerun.no_limmit )
+                isr.crt_action.p.dest_poz.coord[i] = 0x80000000;                    // practically infinite negative value
+            else
+            {
+                isr.crt_action.p.dest_poz.coord[i] = 0;     // max travel
+                if ( isr.crt_action.p.dest_poz.coord[i] == isr.crt_poz.coord[i] )
+                {
+                    isr.crt_action.channel_active &= ~(1 << i);                     // if we are allready there - disable channel
+                    return;
+                }
+            }
+        }
 
-    if ( dir & (1 << COORD_Z) )
-        HW_SetDirZ_Plus();
+        isr.crt_action.p.Stp_crt[i] = ACC_FACTOR_FP32;                              // first acceleration step
+        local_isr_set_directions( isr.crt_action.dir_mask );
+    }
     else
-        HW_SetDirZ_Minus();
+    {
+        uint32 feed_target;
 
-    if ( dir & (1 << COORD_A) )
-        HW_SetDirA_Plus();
-    else
-        HW_SetDirA_Minus();
+        if ( (isr.freerun.dir_mask ^ isr.crt_action.dir_mask) & (1<<i) )
+            feed_target = 0;                                                // if crt dir differs from set dir, stop it first
+        else
+            feed_target = isr.freerun.feed_target[i];                       // else use the set target speed
+
+        // else add or substract the acceleration till target speed is reached
+        if ( isr.crt_action.p.Stp_crt[i] < feed_target )
+        {
+            isr.crt_action.p.Stp_crt[i] += ACC_FACTOR_FP32;
+            if ( isr.crt_action.p.Stp_crt[i] > feed_target )
+                isr.crt_action.p.Stp_crt[i] = feed_target;
+        }
+        else if ( isr.crt_action.p.Stp_crt[i] > feed_target )
+        {
+            if (isr.crt_action.p.Stp_crt[i] > ACC_FACTOR_FP32)
+                isr.crt_action.p.Stp_crt[i] -= ACC_FACTOR_FP32;
+            else
+                isr.crt_action.p.Stp_crt[i] = 0;
+    
+            if ( isr.crt_action.p.Stp_crt[i] < feed_target )
+                isr.crt_action.p.Stp_crt[i] = feed_target;
+        }
+    }
 }
 
 
@@ -366,12 +448,50 @@ void StepTimerIntrHandler (void)
     if ( isr.state )
     {
         int i;
-        int n;
 
         StepDBG_TickCount();
 
-        n = local_isr_speed_scale();
-        while ( n )
+        if ( isr.state != MCISR_STATUS_FREERUN )
+        {
+            // Normal run
+            int n;
+
+            n = local_isr_speed_scale();
+            while ( n )
+            {
+                for ( i=0; i<CNC_MAX_COORDS; i++ )
+                {
+                    if ( isr.ckmask & (1 << i) )
+                        local_isr_step_turn_channel_off(i);
+    
+                    if ( isr.crt_action.channel_active & (1 << i) ) // channel is in move
+                    {
+                        local_isr_step_channel(i);
+                    }
+                }
+    
+                local_isr_recalculate_speeds();
+    
+                // if movement action is finished, set to idle and if available start a new one
+                if ( isr.crt_action.channel_active == 0 )
+                {
+                    isr.state = MCISR_STATUS_IDLE;
+                    StepDBG_SegmentFinished();
+    
+                    // release element
+                    isr.stepper_fifo.r++;
+                    if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
+                        isr.stepper_fifo.r = 0;
+                    isr.stepper_fifo.c--;
+    
+                    // check for the next
+                    if ( isr.stepper_fifo.c )
+                        local_isr_fetch_new_action();
+                }
+                n--;
+            }
+        }
+        else        // FREERUN
         {
             for ( i=0; i<CNC_MAX_COORDS; i++ )
             {
@@ -380,29 +500,17 @@ void StepTimerIntrHandler (void)
 
                 if ( isr.crt_action.channel_active & (1 << i) ) // channel is in move
                 {
+                    local_isr_recalculate_free_speeds(i);
                     local_isr_step_channel(i);
                 }
+
+                // if movement action is finished, set to idle and if available start a new one
+                if ( isr.crt_action.channel_active == 0 )
+                {
+                    isr.state = MCISR_STATUS_IDLE;
+                    StepDBG_SegmentFinished();
+                }
             }
-
-            local_isr_recalculate_speeds();
-
-            // if movement action is finished, set to idle and if available start a new one
-            if ( isr.crt_action.channel_active == 0 )
-            {
-                isr.state = MCISR_STATUS_IDLE;
-                StepDBG_SegmentFinished();
-
-                // release element
-                isr.stepper_fifo.r++;
-                if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
-                    isr.stepper_fifo.r = 0;
-                isr.stepper_fifo.c--;
-
-                // check for the next
-                if ( isr.stepper_fifo.c )
-                    local_isr_fetch_new_action();
-            }
-            n--;
         }
     }
     else
@@ -459,7 +567,9 @@ void    stepper_get_coord( struct SStepCoordinates *coord )
 }
 
 
-#define stepper_check_in_progress()     ( isr.stepper_fifo.c )                  // stepper ISR is running a sequence
+#define stepper_check_in_progress()     ( isr.stepper_fifo.c )                  // stepper ISR is running a sequence (fifo.c is cleared uppon finishing the last sequence from fifo)
+
+#define stepper_check_in_running()      ( isr.state != MCISR_STATUS_IDLE )
 
 void    stepper_insert_step( uint32 coords, uint32 dirmask )
 {
@@ -564,6 +674,22 @@ struct SStepFifoElement *stepper_get_current_in_run(void)
     elem = &isr.stepper_fifo.stp[isr.stepper_fifo.r];
     __enable_interrupt();
     return elem;
+}
+
+void stepper_freerun_axis( uint32 axis, bool dir, uint32 feed, bool no_limit )
+{
+    __disable_interrupt();
+    if ( (isr.crt_action.channel_active & (1<<axis)) == 0 )     // if current channel was not in run - initialize it's parameter
+    {
+        isr.crt_action.p.Stp_crt[axis] = 0;
+    }
+    isr.crt_action.channel_active |= (1<<axis);
+    isr.freerun.max_travel.coord[axis] = core.max_travel.coord[axis];
+    isr.freerun.no_limmit = no_limit;
+    isr.freerun.feed_target[axis] = feed;
+    isr.freerun.dir_mask |= dir ? (1<<axis) : 0; 
+    isr.state = MCISR_STATUS_FREERUN;
+    __enable_interrupt();
 }
 
 
@@ -1338,6 +1464,7 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
 
 void motion_init( void )
 {
+    stepper_stop();
     memset( &core, 0, sizeof(core) );
     memset( &isr, 0, sizeof(isr) );
 }
@@ -1436,6 +1563,19 @@ int motion_step( uint32 axis, uint32 dir )
 }
 
 
+int motion_freerun( uint32 axis, bool dir, uint32 feed, bool no_lim )
+{
+    uint32 feedfp32;
+    if ( core.status.is_started )
+        return -1;
+
+    feedfp32 = internal_calculate_stepspeed( feed );
+    stepper_freerun_axis(axis, dir, feedfp32, no_lim);
+    core.status.is_freerun = true;
+    return 0;
+}
+
+
 int motion_sequence_insert( struct SMotionSequence *seq )
 {
     return internal_sequence_fifo_insert(seq);
@@ -1445,6 +1585,10 @@ int motion_sequence_insert( struct SMotionSequence *seq )
 int motion_sequence_start( void )
 {
     struct SEventStruct evt = { 0, };
+
+    if ( core.status.is_freerun )
+        motion_sequence_stop();
+
     if ( core.status.is_started )
         return 0;
 
@@ -1461,8 +1605,8 @@ int motion_sequence_start( void )
 
 void motion_sequence_stop( void )
 {
-    int i;
-    if ( core.status.is_started == false )
+    if ( (core.status.is_started == false) &&
+         (core.status.is_freerun == false) )
         return;
 
     // flush all the fifos and the IRQ
@@ -1485,6 +1629,7 @@ void motion_sequence_stop( void )
     // reset running flags
     core.status.is_running = false;
     core.status.is_started = false;
+    core.status.is_freerun = false;
 }
 
 
@@ -1503,6 +1648,11 @@ uint32 motion_sequence_crt_seqID( void )
     return elem->seqID;
 }
 
+
+uint32 motion_sequence_check_run( void )
+{
+    return stepper_check_in_running();
+}
 
 int motion_sequence_register_callback( motion_sequence_callback func )
 {

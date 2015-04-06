@@ -100,7 +100,6 @@
         int32                       scale_crt;          // current speed scale factor
     };
 
-
     struct SDriverPower
     {
         uint32  set_pwr;            // power level set through API - can be automated also - in this case the standby current is set up
@@ -116,8 +115,9 @@
     {
         bool is_running;                        // sequencer is running an active sequence ( busy state )
         bool is_started;                        // sequencer is started (may not run anyhting if sequence fifo is empty)
+        bool is_freerun;
 
-        struct SMotionInternals  motion;                // internal status and saved precalculations for generating the next motion
+        struct SMotionInternals  motion;        // internal status and saved precalculations for generating the next motion
 
         struct SDriverPower      pwr[CNC_MAX_COORDS];   // power settings for axis
         bool                     pwr_check;             // set when need to check power setup completion, cleared when all dirty flags are false
@@ -141,6 +141,7 @@
     #define MCISR_STATUS_RUP        1       // speed ramp up
     #define MCISR_STATUS_CT         2       // constant speed
     #define MCISR_STATUS_RDOWN      3       // speed ramp down
+    #define MCISR_STATUS_FREERUN    4       // freerun status
 
 
     struct SMotionCoreISRop
@@ -149,6 +150,14 @@
         uint32  Dprev[CNC_MAX_COORDS];
         uint64  ctr_speed64[CNC_MAX_COORDS];    // current speed in fp64. We need the extra precision for small acceleration accumulation
 
+    };
+
+    struct SMotionCoreISRFree
+    {
+        uint32                  feed_target[CNC_MAX_COORDS];    // current speed - fractional to 32:32fp format
+        uint32                  dir_mask;
+        struct SStepCoordinates max_travel;                     // max travel in case if no_limmit = 0
+        bool                    no_limmit;                      // if 1 then limits are set up to a practically infinite value
     };
 
     enum EIRSuserLevelRequest
@@ -160,6 +169,7 @@
         isrur_execute_inband,
     };
 
+
     struct SMotionCoreISR
     {
         uint32  state;                              // see MCISR_STATUS_XXX defines
@@ -167,8 +177,8 @@
         struct SMotionStepperFifo   stepper_fifo;   // output fifo for the stepper IRQ
 
         struct SMotionCoreISRaction crt_action;     // action passed from user level
-        struct SMotionCoreISRaction next_action;    // next movement action to be executed - set up by the user level core code
         struct SMotionCoreISRop     op;             // operation
+        struct SMotionCoreISRFree   freerun;        // freerun related setup/params
 
         uint32  ckmask;                             // bitmask with channels where clock signal is set
         uint32  ckoff[CNC_MAX_COORDS];              // clock off timeout
