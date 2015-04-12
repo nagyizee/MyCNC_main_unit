@@ -74,6 +74,7 @@
 #include "hw_stuff.h"
 #include "events_ui.h"
 #include "motion_core.h"
+#include "cnc_sequencer.h"
 
 static uint32 *stack_limit;
 
@@ -108,7 +109,7 @@ void main_entry( uint32 *stack_top )
     stack_limit = stack_top;
     InitHW();               // init hardware
 
-    sequencer_init();
+    sequencer_init(false);
 }
 
 

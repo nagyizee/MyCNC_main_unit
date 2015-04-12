@@ -54,7 +54,7 @@
     //              [ACK] + (data)  - immediately after reception and if execution is started without problems
     //              [NAK]           - (internal) faulty communication, timeout, incomplete data, checksum error
     //              [INV]           - erronous or invalid parameters 
-    //              [PEN]           - an other outband command is in execution
+    //              [PEN]           - an other outband command is in execution or inbands are in run in case of [SA] type outband
     // 
     //  [IB]    - inband commands can be sent as bulk with one cksum. Maximum command bulk lenght can not exceed input communication fifo size
     //              [ACK] + [cmd fifo free space]
@@ -66,11 +66,14 @@
     // 
     //  for dumps:  [DMP] + (data)  - transmitted periodically
     // 
+    //  after reset or fresh start: [RST][RST][RST][RST]  -> this notifies the master about the start-up or reset
+    // 
 
     #define CMD_INPUT_BUFFER_SIZE       256
 
     #define RESP_ACK        0xA5        // 1010 0101
     #define RESP_DMP        0xAF        // 1010 1111
+    #define RESP_RST        0xA9        // 1010 1001
 
     #define RESP_NAK        0x55        // 0101 0101        - NAK is sent internally
     #define RESP_INV        0x59        // 0101 1001
@@ -86,13 +89,14 @@
 
     // command type definition:
     // setup commands
-    #define CMD_OBSA_RESET                  0x00    // resets everything from fresh start state. Setup is needed after it.
+    #define CMD_OB_RESET                    0x55    // resets everything from fresh start state. Setup is needed after it. Overrides other standalone commands
                                                     // IN:      [0xAA][0x00][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted and reset is started
                                                     //          [PEN] - if another is in execution
                                                     //          [INV] - if sequencer is running
 
     #define CMD_OBSA_SETUP_MAX_TRAVEL       0x01    // set the maximum travels on each axis 
+                                                    // sets the current cordinates also - recommended to call it when machine is at the absolute max. pozition 
                                                     // (defaults are 130x46x80x360)
                                                     // IN:      [0xAA][0x81][0x0a][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted
@@ -121,6 +125,10 @@
 
     // internal automation and movements            - stop command will cancel their execution and mark them as failed
     #define CMD_OBSA_FIND_ORIGIN            0x11    // search the maximums of each axis. Origin will be this coordinate - maximum travel
+                                                    // - in case of front-end it will search the end points automatically. Master should assure that 
+                                                    // milling head is cleared of any obstacle. Use the freerun commands.
+                                                    // - if no front-end is present - this command will set up the max travels as current coordinates and returns 
+                                                    // synchronously
                                                     // IN:      [0xAA][0x11][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
                                                     //          [PEN] - if another operation is in execution
@@ -139,11 +147,25 @@
                                                     //          [INV] - if sequencer is running / invalid data received
 
     #define CMD_OBSA_STEP                   0x14    // step axis
+                                                    // Stop is recommended after stepping finished since it doesn't detect missing steps
                                                     // IN:      [0xAA][0x94][0x01][aaaa dddd][cksum]
                                                     //          aaaa - step bits for a/z/y/x,  dddd - direction bits for a/z/y/x
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
                                                     //          [PEN] - if another operation is in execution
                                                     //          [INV] - if sequencer is running / can not step
+    
+    #define CMD_OBSA_FREERUN                0x15    // freerun command for the given axis. Only one axis is permitted at the same time.
+                                                    // command is cancelled by stop command or by 10ms timeout. To run it continuously it should
+                                                    // be retransmitted in the timeout interval
+                                                    // IN:      [0xAA][0x94][0x02][aaLd ffff][ffff ffff][cksum]
+                                                    //          aa   - axis to be controlled
+                                                    //          L    - if 1 then max travel is not used (proceed with care)
+                                                    //          d    - direction: 1 - positive, 0 - negative
+                                                    //          fff  - feed in mm/min
+                                                    // OUT:     [ACK][0x00] - if accepted / operation started
+                                                    //          [PEN] - if another operation is in execution
+                                                    //          [INV] - if sequencer is running / can not step
+
 
     // operational commands
     #define CMD_OBSA_START                  0x21    // start the command execution or resume last interrupted command. 
@@ -275,6 +297,14 @@
         uint32  dir_mask;
     };
 
+    struct SCmdType_freerun
+    {
+        uint8  axis;
+        uint8  dir;
+        uint16 feed;
+        bool   no_limit;
+    };
+
     struct SCmdType_GetCoord
     {
         bool    is_setup;           // command is a setup, not an immediate poll
@@ -354,6 +384,7 @@
             struct SStepCoordinates     home_poz;
             struct SStepCoordinates     probe_poz;
             struct SCmdType_step        step;
+            struct SCmdType_freerun     frun;
             int32                       scale_feed;
             int32                       scale_spindle;
             struct SCmdType_GetCoord    get_coord;

@@ -14,6 +14,7 @@
     #define COORD_Z             2
     #define COORD_A             3
 
+    #define CNC_COORD_UNINIT    ( (TStepCoord)0x80000000 )
 
     #define CNC_DEFAULT_X      130*400
     #define CNC_DEFAULT_Y      46*400

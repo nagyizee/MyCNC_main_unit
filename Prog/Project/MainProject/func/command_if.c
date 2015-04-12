@@ -1,3 +1,4 @@
+#include <string.h>
 #include "command_if.h"
 #include "command_if_internals.h"
 #include "comm_cmd.h"
@@ -23,7 +24,7 @@ static void internal_add_cksum( uint8 byte )
     comm.cksum += byte;     // TBD
 }
 
-static uint8 internal_add_out_cksum( uint8 *cksum, uint8 byte )
+static void internal_add_out_cksum( uint8 *cksum, uint8 byte )
 {
     *cksum += byte;     // TBD
 }
@@ -39,7 +40,7 @@ static int internal_check_command( uint32 cmd_id, uint32 cmd_len, bool check_ib 
 {
     switch ( cmd_id )
     {
-        case CMD_OBSA_RESET:
+        case CMD_OB_RESET:
         case CMD_OBSA_FIND_ORIGIN:
         case CMD_OBSA_GO_HOME:
         case CMD_OBSA_FIND_Z_ZERO:
@@ -86,6 +87,12 @@ static int internal_check_command( uint32 cmd_id, uint32 cmd_len, bool check_ib 
             if ( check_ib )
                 return -1;
             if ( cmd_len == 1 )
+                return 0;   // ok
+            break;
+        case CMD_OBSA_FREERUN:
+            if ( check_ib )
+                return -1;
+            if ( cmd_len == 2 )
                 return 0;   // ok
             break;
 
@@ -172,6 +179,17 @@ static inline int internal_pc_step( struct ScmdIfCommand *command )
     // [0xAA][0x94][0x01] - [aaaa dddd] - [cksum]
     command->cmd.step.axis_mask = ( comm_buffer[0] >> 4 ) & 0x0f;
     command->cmd.step.dir_mask = comm_buffer[0] & 0x0f;
+    return 0;
+}
+
+static inline int internal_pc_freerun( struct ScmdIfCommand *command )
+{
+    //                           0
+    // [0xAA][0x94][0x02] - [aaLd ffff][ffff ffff] - [cksum]
+    command->cmd.frun.axis = ( comm_buffer[0] >> 6 ) & 0x03;
+    command->cmd.frun.no_limit = ( comm_buffer[0] & 0x20 ) ? true : false;
+    command->cmd.frun.dir = ( comm_buffer[0] & 0x10 ) ? 1 : 0;
+    command->cmd.frun.feed = ( (comm_buffer[0] & 0x0f)<<8) | comm_buffer[1];
     return 0;
 }
 
@@ -273,7 +291,7 @@ static inline int internal_pc_goto( uint8 *buffer, uint32 plen, struct ScmdIfCom
     return 0;
 }
 
-static inline internal_pc_drill( uint8 *buffer, struct ScmdIfCommand *command )
+static inline int internal_pc_drill( uint8 *buffer, struct ScmdIfCommand *command )
 {
     //                0        1          2          3          4          5          6          7          8          9          10         11         12         13         14           
     // [0xC5][0x0f][cmdID][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz ZZZZ][ZZZZ ZZZZ][ZZZZ ZZZZ][nnnn nnnn][ffff ffff][ffff cccc][cccc cccc]           
@@ -433,7 +451,6 @@ static inline int internal_sr_ack_probe_touch( struct ScmdIfResponse *response )
     // [ACK][0x88][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz 0000][cksum]
     uint8 cksum = (uint8)(COMMCKSUMSTART);
     uint8 data;
-    int i;
 
     if ( comm_cmd_GetOutFree() < 11 )
         return -1;
@@ -485,7 +502,7 @@ static int internal_parse_command( uint32 cmd_id, uint8 *buffer, uint32 plen, st
 
     switch ( cmd_id )
     {
-        case CMD_OBSA_RESET:            res = 0; break;
+        case CMD_OB_RESET:              res = 0; break;
         case CMD_OBSA_SETUP_MAX_TRAVEL: res = internal_pc_setup_max_travel( command ); break;
         case CMD_OBSA_SETUP_MAX_SPEEDS: res = internal_pc_setup_max_speed( command ); break;
         case CMD_OBSA_SETUP_HOME_POZ:   res = internal_pc_setup_home_poz( command ); break;
@@ -494,6 +511,7 @@ static int internal_parse_command( uint32 cmd_id, uint8 *buffer, uint32 plen, st
         case CMD_OBSA_GO_HOME:          res = 0; break;
         case CMD_OBSA_FIND_Z_ZERO:      res = 0; break;
         case CMD_OBSA_STEP:             res = internal_pc_step( command ); break;
+        case CMD_OBSA_FREERUN:          res = internal_pc_freerun( command ); break;
         case CMD_OBSA_START:            res = 0; break;
         case CMD_OB_PAUSE:              res = 0; break;
         case CMD_OB_STOP:               res = 0; break;
@@ -589,7 +607,16 @@ static int internal_send_response( struct ScmdIfResponse *response )
                     break;
             }
             break;
+        case RESP_RST:
+            res = 0;
+            comm_wrChar( RESP_RST );
+            comm_wrChar( RESP_RST );
+            comm_wrChar( RESP_RST );
+            comm_wrChar( RESP_RST );
+            break;
+
     }
+    return res;
 }
 
 
@@ -619,6 +646,7 @@ void cmdif_poll( struct SEventStruct *evt )
             comm_cmd_InFlush();
             internal_command_flush();
             evt->comm_input_overflow = 1;
+            internal_respond_byte( RESP_OVF );
         }
 
         if ( comm.state == CSTATE_CMD_TO_GET )

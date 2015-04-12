@@ -518,6 +518,8 @@ _error_exit:
                 case feop_touch_detect:
                     local_poll_touch(evt);
                     break;
+                default:
+                    break;
             }
         }
     }
@@ -658,9 +660,13 @@ _error_exit:
 
     bool front_end_is_coordinate_request_sent( void )
     {
-        if ( (fe.op == feop_coord_get) && commfe_is_outfifo_empty() )
-            return true;
-        return false;
+        if ( fe.in_use )
+        {
+            if ( (fe.op == feop_coord_get) && commfe_is_outfifo_empty() )
+                return true;
+            return false;
+        }
+        return true;
     }
 
 

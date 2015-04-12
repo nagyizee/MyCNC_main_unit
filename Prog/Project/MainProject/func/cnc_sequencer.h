@@ -11,7 +11,7 @@
 
 
     // init sequencer
-    void sequencer_init();
+    void sequencer_init(bool restart);
 
 
     // poll the sequencer

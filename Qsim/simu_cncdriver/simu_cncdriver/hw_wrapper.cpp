@@ -894,6 +894,41 @@ int local_parse_step( char *chunk, uint8 *outdata, int *out_ptr )
     return 0;
 }
 
+int local_parse_freerun( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    // [P_x,+,1,300]
+    int i;
+    int j;
+    int ptr;
+    char *token[4];
+    uint8 field = 0;
+    bool no_limit = false;
+
+    ptr = *out_ptr;
+
+    token[0] = strtok( chunk, " ," );       // axis selector
+    token[1] = strtok( NULL, " ," );        // direction
+    token[2] = strtok( NULL, " ," );        // unlimitted
+    token[3] = strtok( NULL, " ," );        // feed rate
+    if ( (token[0] == NULL) || (token[1] == NULL) || (token[2] == NULL) || (token[3] == NULL) )
+        return -1;
+    switch ( token[0][0] )
+    {
+        case 'x': outdata[ptr] = 0x00; break;
+        case 'y': outdata[ptr] = 0x40; break;
+        case 'z': outdata[ptr] = 0x80; break;
+        case 'a': outdata[ptr] = 0xC0; break;
+        default:
+            return -1;
+    }
+    outdata[ptr] |= ( token[2][0] == '1' ) ? 0x20 : 0x00;
+    outdata[ptr] |= ( token[1][0] == '+' ) ? 0x10 : 0x00;
+    outdata[ptr++] |= ( token[3][0] >> 8 ) & 0x0f;
+    outdata[ptr++] = token[3][0] & 0xff;
+    *out_ptr = ptr;
+    return 0;
+}
+
 int local_parse_scale( char *chunk, uint8 *outdata, int *out_ptr )
 {
     int ptr;
@@ -1191,7 +1226,7 @@ int mainw::HW_wrp_input_line(QString line)
                     return -1;
 
                 if ( strncmp(token+3, "rest", 4 ) == 0 )
-                    cmd_type = CMD_OBSA_RESET;
+                    cmd_type = CMD_OB_RESET;
                 else if ( strncmp(token+3, "stmt", 4 ) == 0 )
                     cmd_type = CMD_OBSA_SETUP_MAX_TRAVEL;
                 else if ( strncmp(token+3, "stms", 4 ) == 0 )
@@ -1208,6 +1243,8 @@ int mainw::HW_wrp_input_line(QString line)
                     cmd_type = CMD_OBSA_FIND_Z_ZERO;
                 else if ( strncmp(token+3, "step", 4 ) == 0 )
                     cmd_type = CMD_OBSA_STEP;
+                else if ( strncmp(token+3, "frun", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_FREERUN;
                 else if ( strncmp(token+3, "STRT", 4 ) == 0 )
                     cmd_type = CMD_OBSA_START;
                 else if ( strncmp(token+3, "PAUS", 4 ) == 0 )
@@ -1274,6 +1311,10 @@ int mainw::HW_wrp_input_line(QString line)
                             break;
                         case CMD_OBSA_STEP:                                 // [H][C_step][P_xza,--+][S]
                             if ( local_parse_step( token+3, outdata + out_ptr + 1, &p_len ) )
+                                return -1;
+                            break;
+                        case CMD_OBSA_FREERUN:                              // [H][C_frun][P_x,+,1,300][S]   or [H][C_frun][P_x,+,0,300][S]
+                            if ( local_parse_freerun( token+3, outdata + out_ptr + 1, &p_len ) )
                                 return -1;
                             break;
                         case CMD_OB_SCALE_FEED:                             // [H][C_scfd][P_-150][S]
@@ -1429,6 +1470,11 @@ void mainw::HW_wrp_spindle_jam(void)
 bool HW_FrontEnd_Event(void)
 {
     return ssimu.flag;
+}
+
+void HW_Wait_Reset(void)
+{
+
 }
 
 void mainw::HW_wrp_front_end_simu()

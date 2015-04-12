@@ -71,6 +71,7 @@ void HW_SetPower( int axis, int pwr_level );
 bool HW_IsPowerSet( int axis );
 
 bool HW_FrontEnd_Event(void);
+void HW_Wait_Reset(void);
 
 void StepDBG_Accelerations( int phase, int sense );     // 0 - beginnig, 1 - const, 2 - end;  sense: 1 - accel, 0 - decel
 void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *c2, int secuenceID );
