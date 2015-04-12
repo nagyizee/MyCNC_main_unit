@@ -1502,11 +1502,11 @@ void motion_pwr_ctrl( uint32 axis, enum EPowerLevel power )
     core.status.pwr[axis].set_pwr = power;
     if ( (power == mpwr_auto) && (core.status.is_running == false) )
     {
-        internal_pwr_set_axis_power( axis, mpwr_low, 0 );
+        internal_pwr_set_axis_power( axis, mpwr_low, 10 );
     }
     if ( power != mpwr_auto )
     {
-        internal_pwr_set_axis_power( axis, power, 0 );
+        internal_pwr_set_axis_power( axis, power, (power == mpwr_low) ? 10 : 0 );
     }
 }
 
@@ -1649,9 +1649,9 @@ uint32 motion_sequence_crt_seqID( void )
 }
 
 
-uint32 motion_sequence_check_run( void )
+bool motion_sequence_check_run( void )
 {
-    return stepper_check_in_running();
+    return ( stepper_check_in_running() || stepper_check_in_progress() );
 }
 
 int motion_sequence_register_callback( motion_sequence_callback func )

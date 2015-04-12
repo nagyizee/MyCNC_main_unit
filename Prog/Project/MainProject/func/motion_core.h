@@ -109,7 +109,7 @@
     uint32 motion_sequence_crt_seqID( void );
 
     // returns 1 if step engine is actievly running a sequence or a freerun
-    uint32 motion_sequence_check_run( void );
+    bool motion_sequence_check_run( void );
 
     // callback prototype for externally executed inband operations 
     typedef void (*motion_sequence_callback)( uint32 seqType, uint32 value );
