@@ -49,5 +49,10 @@
 [H][C_step][P_xyz,+--][S]
 
 #test FreeRun
-[H][C_frun][P_x,-,n,200][S]
+[H][C_frun][P_x,-,0,200][S]
+[H][C_frun][P_x,-,0,200][S]
+[H][C_frun][P_x,+,0,200][S]
+[H][C_frun][P_x,+,0,200][S]
+[H][C_frun][P_x,+,0,200][S]
+[H][C_frun][P_y,-,0,200][S]
 

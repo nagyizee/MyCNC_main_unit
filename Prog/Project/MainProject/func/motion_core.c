@@ -501,7 +501,8 @@ void StepTimerIntrHandler (void)
                 if ( isr.crt_action.channel_active & (1 << i) ) // channel is in move
                 {
                     local_isr_recalculate_free_speeds(i);
-                    local_isr_step_channel(i);
+                    if ( isr.crt_action.channel_active & (1 << i) )
+                        local_isr_step_channel(i);
                 }
             }
             // if movement action is finished, set to idle and if available start a new one
@@ -686,6 +687,7 @@ void stepper_freerun_axis( uint32 axis, bool dir, uint32 feed, bool no_limit )
     isr.freerun.max_travel.coord[axis] = core.max_travel.coord[axis];
     isr.freerun.no_limmit = no_limit;
     isr.freerun.feed_target[axis] = feed;
+    isr.freerun.dir_mask &= ~(1<<axis);
     isr.freerun.dir_mask |= dir ? (1<<axis) : 0; 
     isr.state = MCISR_STATUS_FREERUN;
     __enable_interrupt();

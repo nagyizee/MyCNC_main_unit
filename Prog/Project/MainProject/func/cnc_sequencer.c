@@ -647,6 +647,15 @@ static inline void internal_poll_ob_freerun( struct SEventStruct *evt )
 
     if ( evt->timer_tick_100us )
     {
+        // check when motion core finished the run
+        if ( motion_sequence_check_run() == false )
+        {
+            // finish the command by stopping and updating everything
+            internal_outband_stop(false);
+            internal_ob_helper_setstate_suceed();
+            return;
+        }
+
         switch ( cnc.status.outband.state )
         {
             case obstat_frun_running:            // running a freerun operation
@@ -675,13 +684,7 @@ static inline void internal_poll_ob_freerun( struct SEventStruct *evt )
                 }
                 break;
             case obstat_frun_stopping:
-                // check when motion core finished the run
-                if ( motion_sequence_check_run() == false )
-                {
-                    // finish the command by stopping and updating everything
-                    internal_outband_stop(false);
-                    internal_ob_helper_setstate_suceed();
-                }
+                // currently nothing to do here
                 break;
         }
     }

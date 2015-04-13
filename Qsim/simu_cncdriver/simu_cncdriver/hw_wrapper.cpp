@@ -923,8 +923,8 @@ int local_parse_freerun( char *chunk, uint8 *outdata, int *out_ptr )
     }
     outdata[ptr] |= ( token[2][0] == '1' ) ? 0x20 : 0x00;
     outdata[ptr] |= ( token[1][0] == '+' ) ? 0x10 : 0x00;
-    outdata[ptr++] |= ( token[3][0] >> 8 ) & 0x0f;
-    outdata[ptr++] = token[3][0] & 0xff;
+    outdata[ptr++] |= ( atoi(token[3]) >> 8 ) & 0x0f;
+    outdata[ptr++] = atoi(token[3]) & 0xff;
     *out_ptr = ptr;
     return 0;
 }
