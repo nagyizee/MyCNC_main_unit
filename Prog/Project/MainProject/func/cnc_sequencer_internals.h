@@ -19,7 +19,7 @@
 
     #define SEQ_PERIOD_COORD_CHK_FRUN       100     // 10.0ms
     #define SEQ_PERIOD_COORD_CHK_OUTBAND    100     // 10.0 ms
-    #define SEQ_PERIOD_FRUN_SAFESTOP        1500    // 150.0ms
+    #define SEQ_PERIOD_FRUN_SAFESTOP        2000    // 200.0ms
 
     #define SEQ_MAX_COORDDEV_FRUN       5       // maximum 5 steps are allowed as deviation at freerun  
     #define SEQ_MAX_COORDDEV_OUTBAND    2

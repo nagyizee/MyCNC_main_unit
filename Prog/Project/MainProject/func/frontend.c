@@ -44,11 +44,14 @@ static int internal_cmd_response_poll( bool tick100us )
     bool req_retry = false;
 
     res = commfe_checkResponse( fe.opstat.out_resp_len );
-    if ( (res == COMMFE_PENDING) && (tick100us) )
+    if ( res == COMMFE_PENDING )
     { 
-        fe.opstat.timeout_ctr--;
-        if ( fe.opstat.timeout_ctr == 0 )
-            req_retry = true;
+        if (tick100us)
+        {
+            fe.opstat.timeout_ctr--;
+            if ( fe.opstat.timeout_ctr == 0 )
+                req_retry = true;
+        }
     }
     else if (res == COMMFE_NAK)
     {
@@ -816,6 +819,8 @@ _error_exit:
         fe.opstat.retries = FE_MSG_RETRY;
         do
         {
+            StepDBG_QT_innerLoop();
+
             evt = Event_Poll();
 
             res = internal_cmd_response_poll( evt.timer_tick_100us ? true : false );

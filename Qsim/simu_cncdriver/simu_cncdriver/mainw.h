@@ -113,6 +113,7 @@ public:
     void HW_wrapper_update_display( bool redrw_ui );
     bool HW_wrp_fe_broken_link();
 
+    void HW_wrp_front_end_simu();
 
 
 private:
@@ -132,7 +133,6 @@ private:
 
 
     void HW_wrp_spindle_jam(void);
-    void HW_wrp_front_end_simu();
 
 };
 

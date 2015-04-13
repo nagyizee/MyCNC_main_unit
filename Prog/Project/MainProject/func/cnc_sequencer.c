@@ -191,6 +191,7 @@ static int internal_procedure_coordinate_check_poll( struct SEventStruct *evt )
     // front end poll is done in the main sequencer poll loop - do not duplicate here
     if ( evt->fe_op_completed )
     {
+        cnc.status.procedure.procID = procid_none;
         if ( evt->fe_op_failed )
         {
             cnc.status.flags.f.err_fatal = 1;
@@ -251,6 +252,7 @@ static int internal_procedure_spindle_pwrdown_poll( struct SEventStruct *evt )
     {
         if ( evt->fe_op_failed )
         {
+            cnc.status.procedure.procID = procid_none;
             cnc.status.flags.f.err_fatal = 1;
             cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
             return -1;

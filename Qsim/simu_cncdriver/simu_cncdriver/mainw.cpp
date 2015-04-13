@@ -127,7 +127,7 @@ void mainw::TimerTick()
 
         StepTimerIntrHandler();
 
-        if ( i % 0x01 )
+        if ( i & 0x01 )
             HW_wrp_front_end_simu();        // 25khz rate  ~235kbps
         if ( i % 5 )                        // 10khz rate  - close to 11kbps
             HW_wrp_simu_datafeed();

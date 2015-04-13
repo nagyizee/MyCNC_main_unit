@@ -48,3 +48,6 @@
 [H][C_step][P_xyz,+++][S]
 [H][C_step][P_xyz,+--][S]
 
+#test FreeRun
+[H][C_frun][P_x,-,n,200][S]
+

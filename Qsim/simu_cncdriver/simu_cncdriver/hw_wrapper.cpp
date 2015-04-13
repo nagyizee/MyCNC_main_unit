@@ -1477,6 +1477,12 @@ void HW_Wait_Reset(void)
 
 }
 
+void StepDBG_QT_innerLoop()
+{
+    StepTimerIntrHandler();
+    pClass->HW_wrp_front_end_simu();
+}
+
 void mainw::HW_wrp_front_end_simu()
 {
     uint32 sstat = 0;

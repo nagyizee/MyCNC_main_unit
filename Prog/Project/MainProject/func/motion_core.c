@@ -323,7 +323,7 @@ static inline void local_isr_recalculate_free_speeds( int i )
     // if speed is 0 - set up direction and end limit
     if ( isr.crt_action.p.Stp_crt[i] == 0 )
     {
-        if ( isr.freerun.feed_target == 0 )         // if target speed is 0, we have 0 current speed - disable axis
+        if ( isr.freerun.feed_target[i] == 0 )         // if target speed is 0, we have 0 current speed - disable axis
         {
             isr.crt_action.channel_active &= ~(1 << i);
             return;
@@ -503,13 +503,12 @@ void StepTimerIntrHandler (void)
                     local_isr_recalculate_free_speeds(i);
                     local_isr_step_channel(i);
                 }
-
-                // if movement action is finished, set to idle and if available start a new one
-                if ( isr.crt_action.channel_active == 0 )
-                {
-                    isr.state = MCISR_STATUS_IDLE;
-                    StepDBG_SegmentFinished();
-                }
+            }
+            // if movement action is finished, set to idle and if available start a new one
+            if ( isr.crt_action.channel_active == 0 )
+            {
+                isr.state = MCISR_STATUS_IDLE;
+                StepDBG_SegmentFinished();
             }
         }
     }

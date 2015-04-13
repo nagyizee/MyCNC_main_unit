@@ -77,6 +77,7 @@ void StepDBG_Accelerations( int phase, int sense );     // 0 - beginnig, 1 - con
 void StepDBG_LineSegment( struct SStepCoordinates *c1, struct SStepCoordinates *c2, int secuenceID );
 void StepDBG_SegmentFinished( void );
 void StepDBG_TickCount();
+void StepDBG_QT_innerLoop();
 
 // just a wrapper solution
 void main_entry(uint32 *stack_top);
