@@ -965,6 +965,7 @@ void sequencer_init( bool restart )
 
     // init motion core 
     motion_set_crt_coord( &cnc.setup.max_travel );          // consider starting with maximum coordinates
+    motion_set_max_travel( &cnc.setup.max_travel ); 
 
     motion_pwr_ctrl( COORD_X, mpwr_auto );
     motion_pwr_ctrl( COORD_Y, mpwr_auto );

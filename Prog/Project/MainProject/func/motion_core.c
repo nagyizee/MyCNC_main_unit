@@ -591,7 +591,7 @@ void    stepper_insert_step( uint32 coords, uint32 dirmask )
     {
         if ( coords & (1 << i) )
         {
-            if ( isr.crt_action.dir_mask & ( 1 << i ) )
+            if ( dirmask & ( 1 << i ) )
                 isr.crt_poz.coord[i]++;
             else
                 isr.crt_poz.coord[i]--;
@@ -1540,7 +1540,7 @@ int motion_step( uint32 axis, uint32 dir )
     if ( core.status.is_started )
         return -1;
 
-    while ( isr.ckmask );
+    while ( isr.ckmask & (1<<axis) );
 
     // we can use directly the the isr coordinate values because there is no action in progress
 

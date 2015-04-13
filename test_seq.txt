@@ -40,5 +40,11 @@
 [H][C_igoo][P_1,xyzf,8,9,10,11][S]
 
 
-
+#test Step
+[H][C_step][P_x,-][S]
+[H][C_step][P_xy,--][S]
+[H][C_step][P_z,-][S]
+[H][C_step][P_xyz,---][S]
+[H][C_step][P_xyz,+++][S]
+[H][C_step][P_xyz,+--][S]
 
