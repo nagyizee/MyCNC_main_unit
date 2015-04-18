@@ -80,6 +80,33 @@ static int internal_cmd_response_poll( bool tick100us )
     return 0;   // still pending
 }
 
+
+int internal_event_loop(void)
+{
+    struct SEventStruct evt;
+    int res;
+
+    fe.opstat.retries = FE_MSG_RETRY;
+    do
+    {
+        StepDBG_QT_innerLoop();
+
+        evt = Event_Poll();
+
+        res = internal_cmd_response_poll( evt.timer_tick_100us ? true : false );
+
+        Event_Clear(evt);
+    } while ( res == 0 );
+
+    if (res == 1)
+    {
+        res = 0;
+    }
+
+    return res;
+}
+
+
 static int internal_command_spindle_pwr( bool enable )
 {
     memcpy( fe.opstat.out_msg, cmd_spindle, sizeof(cmd_spindle) );
@@ -463,25 +490,25 @@ _error_exit:
         // set event flags for spindle jam detection
         if ( internal_command_set_flags( FE_EV_SPINDLE_JAM ) )
             goto _error_exit;
-        if ( front_end_local_event_loop() )
+        if ( internal_event_loop() )
             goto _error_exit;
 
         // power down the spindle assembly
         if ( internal_command_spindle_pwr(false) )
             goto _error_exit;
-        if ( front_end_local_event_loop() )
+        if ( internal_event_loop() )
             goto _error_exit;
 
         // set spindle speed 0
         if ( internal_command_set_spindle_speed(0) )
             goto _error_exit;
-        if ( front_end_local_event_loop() )
+        if ( internal_event_loop() )
             goto _error_exit;
 
         // reset events
         if ( internal_command_get_events() )
             goto _error_exit;
-        if ( front_end_local_event_loop() )
+        if ( internal_event_loop() )
             goto _error_exit;
 
         fe.in_use = true;
@@ -528,7 +555,7 @@ _error_exit:
     }
 
 
-    bool front_end_chek_op_busy( void )
+    bool front_end_check_op_busy( void )
     {
         if ( fe.op )
             return true;
@@ -766,7 +793,7 @@ _error_exit:
         if ( internal_command_get_events() )
             return -1;
         // wait for response
-        if ( front_end_local_event_loop() )
+        if ( internal_event_loop() )
             return -1;
         // read the data
         commfe_getResponse( fe.opstat.out_msg, 3 );
@@ -785,7 +812,7 @@ _error_exit:
         if ( internal_command_get_signals() )
             return -1;
         // wait for response
-        if ( front_end_local_event_loop() )
+        if ( internal_event_loop() )
             return -1;
         // read the data
         commfe_getResponse( fe.opstat.out_msg, 7 );
@@ -804,32 +831,31 @@ _error_exit:
         if ( internal_command_set_raw_rpm( raw_val ) )
             return -1;
         // wait for response
-        if ( front_end_local_event_loop() )
+        if ( internal_event_loop() )
             return -1;
 
         return 0;
     }
 
 
-    int front_end_local_event_loop(void)
+    int front_end_sync_event_loop(void)
     {
         struct SEventStruct evt;
-        int res;
 
-        fe.opstat.retries = FE_MSG_RETRY;
         do
         {
             StepDBG_QT_innerLoop();
 
             evt = Event_Poll();
 
-            res = internal_cmd_response_poll( evt.timer_tick_100us ? true : false );
+            front_end_poll( &evt );
 
             Event_Clear(evt);
-        } while ( res == 0 );
 
-        if (res == 1)
-            res = 0;
-        return res;
+        } while ( evt.fe_op_completed == 0 );
+
+        if ( evt.fe_op_failed )
+            return -1;
+        return 0;
     }
 

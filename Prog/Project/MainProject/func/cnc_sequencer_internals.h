@@ -46,6 +46,13 @@
         obstat_home_motion,                 // moving milling head to home pozition
     };
 
+    enum EOutbandStatus_findorg
+    {
+        obstat_forg_spindledn = 0,          // power down the spindle
+        obstat_forg_back_off,               // clear the coarse end point sensors
+        obstat_forg_search,                 // search the end points
+        obstat_forg_finalize,               // reset the front-end coordinates
+    };
 
     struct SSequencerSetup
     {
@@ -81,6 +88,12 @@
         uint32 m_fail;              // failure counter
     };
 
+    struct SOutbandStatus_findOrg
+    {
+        uint32  axis_mask;          // axis with unfinished job
+
+    };
+
     struct SProc_getCoord
     {
         struct SStepCoordinates coord_snapshot;     // coordinates in motion core when front-end receives the coordinate read command
@@ -109,11 +122,12 @@
             uint32 run_program:1;       // running a program from inband fifo
             uint32 run_ob_failed:1;     // set if an outband command failed - reset at new command
             uint32 run_ob_suceeded:1;   // set if an outband is finished with success - reset at new command
-            uint32 run_sequence:1;      // used in conjungtion with run_outband or run_program when a sequence qeue is in run
 
             uint32 stat_restarted:1;    // set to 1 at start-up, reset at the first status read
             uint32 stat_ep_set:1;       // 0 at start-up, set when endpoint finding command is terminated or if no front-end and max travel is set up
 
+            uint32 spindle_pwr:1;       // set if spindle is powered up and ready to go
+            uint32 spindle_on:1;        // set when spindle is running
 
         } f;
         uint32 byte;
@@ -127,6 +141,7 @@
         {
             struct SOutbandStatus_freerun   frun;
             struct SOutbandStatus_gohome    gohome;
+            struct SOutbandStatus_findOrg   findorg;
 
         } params;
     };

@@ -56,3 +56,7 @@
 [H][C_frun][P_x,+,0,200][S]
 [H][C_frun][P_y,-,0,200][S]
 
+#test find origin
+[H][C_forg][S]
+
+

@@ -127,7 +127,7 @@
     #define CMD_OBSA_FIND_ORIGIN            0x11    // search the maximums of each axis. Origin will be this coordinate - maximum travel
                                                     // - in case of front-end it will search the end points automatically. Master should assure that 
                                                     // milling head is cleared of any obstacle. Use the freerun commands.
-                                                    // - if no front-end is present - this command will set up the max travels as current coordinates and returns 
+                                                    // - if no front-end is present - this command will set up the current coordinates to max travel and returns 
                                                     // synchronously
                                                     // IN:      [0xAA][0x11][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
@@ -181,11 +181,11 @@
                                                     // IN:      [0xAA][0x22][cksum]
                                                     // OUT:     [ACK][0x81][cmdID][cksum] - started executing, cmdID of the command currenty interrupted
 
-    #define CMD_OB_STOP                     0x23    // clears up the running state, empty all the fifos, powers down the spindle
-                                                    // - stop will make other outband commands pending till the spindle stop and coordinate update from frontend
-                                                    //   will not be finished
+    #define CMD_OB_STOP                     0x23    // clears up the running state, empty all the fifos, stops the spindle, updates the coordintes from front-end
+                                                    // - stop is synchronous, ACK will be transmitted at finishing of the operation
+                                                    //   use adequated timeout period.
                                                     // IN:      [0xAA][0x23][cksum]
-                                                    // OUT:     [ACK][0x82][cmdIDex][cmdIDq][cksum] - started executing, 
+                                                    // OUT:     [ACK][0x82][cmdIDex][cmdIDq][cksum] - stopped executing, 
                                                     //                                              cmdIDex - command ID of command currenty interrupted
                                                     //                                              cmdIDq  - the last command ID introduced in the fifo
 

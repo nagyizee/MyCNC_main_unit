@@ -1887,6 +1887,18 @@ void mainw::Disp_Redraw( bool redrw_ui )
 
         ui->cb_fe_event_flag->setChecked( ssimu.flag );
         ui->nm_fe_spindle->setValue( ssimu.spindle_crt_speed );
+
+        {
+            // front_end events
+            QString str= tr("");
+            if ( ssimu.events & FE_EV_A_AXIS ) str += tr("a "); else str += tr("- ");
+            if ( ssimu.events & FE_EV_ENDPOINT ) str += tr("e "); else str += tr("- ");
+            if ( ssimu.events & FE_EV_PROBE ) str += tr("p "); else str += tr("- ");
+            if ( ssimu.events & FE_EV_SPINDLE_JAM ) str += tr("j "); else str += tr("- ");
+            if ( ssimu.events & FE_EV_SPINDLE_OK ) str += tr("o "); else str += tr("- ");
+
+            ui->ln_fe_eventlist->setText( str );
+        }
     }
 
 }

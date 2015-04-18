@@ -36,7 +36,7 @@
     void front_end_poll( struct SEventStruct *evt );
 
     // returns true if an operation is pending on the front end.
-    bool front_end_chek_op_busy( void );
+    bool front_end_check_op_busy( void );
 
 
     // sindle routines
@@ -120,10 +120,9 @@
     // set raw control value for spindle regulator
     int front_end_dbg_set_raw_spindle( uint32 raw_val );
 
-    // do an internal event loop for waiting command completion
-    // routine is synchronous - waits till response message arrives, or returns -1 if timeout or comm. error
-    int front_end_local_event_loop(void);
-
+    // do an internal event loop and polling for operation to obtain a synchronous behavior
+    // returns 0 on success, -1 on failure
+    int front_end_sync_event_loop(void);
 
 
 #ifdef __cplusplus
