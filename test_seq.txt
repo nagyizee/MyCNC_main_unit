@@ -59,4 +59,7 @@
 #test find origin
 [H][C_forg][S]
 
+#test find Z
+[H][C_stpp][P_24000,9200][S]
+[H][C_fzzr][S]
 

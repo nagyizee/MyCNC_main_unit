@@ -54,6 +54,14 @@
         obstat_forg_finalize,               // reset the front-end coordinates
     };
 
+    enum EOutbandStatus_findZ
+    {
+        obstat_findz_spindledn = 0,          // power down the spindle
+        obstat_findz_goXY,                   // go to the Z probe position
+        obstat_findz_search,                 // search the end points
+    };
+
+
     struct SSequencerSetup
     {
         bool                        fe_present;         // if front end is present
@@ -75,6 +83,12 @@
         uint32 rdb;     // readable locations - valid data in the fifo
     };
 
+
+    struct SOutbandProbeInfo
+    {
+        bool valid;                     // info is vslid in this structure
+        struct SStepCoordinates poz;    // probe thouch pozition 
+    };
 
     struct SOutbandStatus_freerun
     {
@@ -142,8 +156,10 @@
             struct SOutbandStatus_freerun   frun;
             struct SOutbandStatus_gohome    gohome;
             struct SOutbandStatus_findOrg   findorg;
+            struct SOutbandStatus_gohome    findZ;
 
         } params;
+        struct SOutbandProbeInfo    probe;
     };
 
     struct SCNCProcedure

@@ -505,6 +505,12 @@ _error_exit:
         if ( internal_event_loop() )
             goto _error_exit;
 
+        // reset coordinates
+        if ( internal_command_reset_coord() )
+            goto _error_exit;
+        if ( internal_event_loop() )
+            goto _error_exit;
+
         // reset events
         if ( internal_command_get_events() )
             goto _error_exit;

@@ -123,7 +123,7 @@
                                                     //          [INV] - if sequencer is running / invalid data received
 
 
-    // internal automation and movements            - stop command will cancel their execution and mark them as failed
+    // internal automation and movements            - stop or pause command will cancel their execution and mark them as failed
     #define CMD_OBSA_FIND_ORIGIN            0x11    // search the maximums of each axis. Origin will be this coordinate - maximum travel
                                                     // - in case of front-end it will search the end points automatically. Master should assure that 
                                                     // milling head is cleared of any obstacle. Use the freerun commands.
@@ -140,7 +140,8 @@
                                                     //          [PEN] - if another operation is in execution
                                                     //          [INV] - if sequencer is running / invalid data received
 
-    #define CMD_OBSA_FIND_Z_ZERO            0x13    // used for tool-tip finding
+    #define CMD_OBSA_FIND_Z_ZERO            0x13    // used for tool-tip finding. it will touch the Z probe, after this it will execute a go home procedure
+                                                    // Note: be aware to clear any obstacle on XY plane at current heigth before executing this command
                                                     // IN:      [0xAA][0x13][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
                                                     //          [PEN] - if another operation is in execution
@@ -168,13 +169,13 @@
 
 
     // operational commands
-    #define CMD_OBSA_START                  0x21    // start the command execution or resume last interrupted command. 
+    #define CMD_OBSA_START                  0x21    // start the command execution or resume last interrupted inband set. 
                                                     // if started - it does nothing
                                                     // IN:      [0xAA][0x21][cksum]
                                                     // OUT:     [ACK][0x00] - executed
                                                     //          [PEN] - if another operation is in execution
 
-    #define CMD_OB_PAUSE                    0x22    // pause execution of the current command, stops the spindle. if no commands are running it does nothing
+    #define CMD_OB_PAUSE                    0x22    // pause execution of inband set, cancels the current command, stops the spindle. if no commands are running it does nothing
                                                     // - emergency button does the same
                                                     // - pause will make other outband commands pending till the spindle stop and coordinate update from frontend
                                                     //   will not be finished

@@ -44,6 +44,8 @@
 struct SCNCSequencerInternals   cnc;
 
 
+int internal_stop( bool leave_ob );
+
 static void internal_helper_set_power( int axis, uint32 feed )
 {
     enum EPowerLevel pwr;
@@ -383,6 +385,111 @@ static void internal_ob_helper_forg_search_setup(uint32 ax_mask)
     }
 }
 
+static void internal_ob_helper_findZ_goto_setup( int sequence )
+{
+    struct SMotionSequence seq;
+    motion_sequence_stop();     // paranoya
+
+    seq.cmdID = 0;
+    seq.seqID = 1;
+    seq.seqType = SEQ_TYPE_GOTO;
+
+    if ( sequence == 0 )       // go to the probe pozition
+    {
+        motion_get_crt_coord( &seq.params.go_to.coord );
+        seq.params.go_to.feed = cnc.setup.feed_rapid;
+        seq.params.go_to.coord.coord[COORD_X] = cnc.setup.z_probe.coord[COORD_X];
+        seq.params.go_to.coord.coord[COORD_Y] = cnc.setup.z_probe.coord[COORD_Y];
+    }
+    else
+    {
+        motion_get_crt_coord( &seq.params.go_to.coord );
+        seq.params.go_to.feed = 300;
+        seq.params.go_to.coord = cnc.setup.z_probe;
+        seq.params.go_to.coord.coord[COORD_Z] = 0;
+        // set up touch detection
+        if ( front_end_check_op_busy() )
+        {
+            front_end_terminate_touch_detection();
+            front_end_sync_event_loop();
+        }
+        front_end_request_touch_detection( FE_TOUCH_PROBE );
+    }
+
+    motion_sequence_insert( &seq );
+    motion_sequence_start();
+}
+
+static int internal_ob_helper_check_skipped_step( struct SEventStruct *evt, uint32 outband )
+{
+    int res;
+
+    res = internal_procedure_coordinate_check_poll(evt);
+    if ( res )
+    {
+        uint32 *mfail;
+        if ( outband == CMD_OBSA_GO_HOME )
+            mfail = &cnc.status.outband.params.gohome.m_fail;
+        else
+            mfail = &cnc.status.outband.params.findZ.m_fail;
+
+        if ( res == 1 )                                 // if coordinate readout is available from front-end
+        {
+            if ( internal_procedure_coordinate_check_crt_coord(SEQ_MAX_COORDDEV_OUTBAND, false) )
+            {
+                // missed step detected
+                cnc.status.flags.f.err_step = 1;
+                (*mfail) += 100;     // failure ctr is decreased with 100 at each 10ms. so failure can be accumulated if problem isn't solved
+                if ( (*mfail) > (SEQ_MAX_MOVEMENT_RETRIALS * 100) )
+                {
+                    cnc.status.flags.f.err_code = GENFAULT_TABLE_STUCK;
+                    cnc.status.flags.f.err_fatal = 1;
+                    return -1;
+                }
+                // stop everything - but maintain procedure status
+                // this will updagte the coordinates also
+                internal_stop( true );
+
+                if ( outband == CMD_OBSA_GO_HOME )
+                {
+                    res = motion_sequence_crt_seqID();              // get the failed sequence id
+                    if ( (res != 1) && (res != 2) )
+                        return -1;
+                    internal_ob_helper_gohome_setsequence( res );   // regenerate movement sequences
+                }
+                else
+                {
+                    internal_ob_helper_findZ_goto_setup( 0 );
+                }
+            }
+            else if ( (*mfail) )
+            {
+                (*mfail)--;
+            }
+        }
+        else                                            // if coordinate readout failed
+            return -1;
+    }
+
+    // trigger coordinate check
+    if ( evt->timer_tick_100us )
+    {
+        uint32 *ccheck;
+        if ( outband == CMD_OBSA_GO_HOME )
+            ccheck = &cnc.status.outband.params.gohome.ccheck;
+        else
+            ccheck = &cnc.status.outband.params.findZ.ccheck;
+
+        (*ccheck)--;
+        if ( (*ccheck) == 0 )
+        {
+            (*ccheck) = SEQ_PERIOD_COORD_CHK_OUTBAND;
+            internal_procedure_coordinate_check_entry();
+        }
+    }
+    return 0;
+}
+
 static void internal_ob_helper_setstate_started(void)
 {
     cnc.status.flags.f.run_outband = 1;
@@ -465,6 +572,7 @@ int internal_stop( bool leave_ob )
     motion_pwr_ctrl( COORD_Z, mpwr_auto );
     motion_pwr_ctrl( COORD_A, mpwr_off );       // A channel is not used in current implementation
 
+    return 0;
 }
 
 
@@ -551,7 +659,7 @@ static inline int internal_outband_probe_poz( struct ScmdIfCommand *cmd )
 
     for (i=0; i<2; i++)
     {
-        if ( cmd->cmd.probe_poz.coord[i] > cnc.setup.z_probe.coord[i] )
+        if ( cmd->cmd.probe_poz.coord[i] > cnc.setup.max_travel.coord[i] )
             return RESP_INV;
     }
 
@@ -621,8 +729,8 @@ static inline int internal_outband_gohome( void )
 
     cnc.status.outband.command.cmd_type = CMD_OBSA_GO_HOME;
     cnc.status.outband.params.gohome.m_fail = 0;
-    cnc.status.outband.state = obstat_home_preparation;
     cnc.status.outband.params.gohome.ccheck = SEQ_PERIOD_COORD_CHK_OUTBAND;
+    cnc.status.outband.state = obstat_home_preparation;
 
     // power down the spindle for safety reason
     if ( cnc.status.flags.f.spindle_pwr )
@@ -639,6 +747,38 @@ static inline int internal_outband_gohome( void )
     return RESP_ACK;
 }
 
+
+static inline int internal_outband_findZzero( void )
+{
+    if ( cnc.status.flags.f.run_outband || cnc.status.flags.f.run_program )
+        return RESP_PEN;
+
+    if ( (cnc.setup.fe_present == false) || (cnc.setup.z_probe.coord[COORD_X] == -1) )
+        return RESP_INV;
+    else
+    {
+        // set up the status of the procedure
+        internal_ob_helper_setstate_started();
+
+        cnc.status.outband.command.cmd_type = CMD_OBSA_FIND_Z_ZERO;
+        cnc.status.outband.state = obstat_findz_spindledn;
+        cnc.status.outband.probe.valid = 0;
+        cnc.status.outband.params.findZ.m_fail = 0;
+        cnc.status.outband.params.findZ.ccheck = SEQ_PERIOD_COORD_CHK_OUTBAND;
+
+        // power down the spindle for safety reason
+        if ( cnc.status.flags.f.spindle_pwr )
+            internal_procedure_spindle_pwrdown_entry(true);
+        else
+        {
+            cnc.status.outband.state++;                         // if spindle is powered down - simply skip to the next state
+            internal_ob_helper_findZ_goto_setup( 0 );           // set up tranzition to Z probe location
+        }
+    }
+
+    internal_send_simple_ack( &cnc.status.outband.command );
+    return RESP_ACK;
+}
 
 static inline int internal_outband_step( struct ScmdIfCommand *cmd )
 {
@@ -752,39 +892,9 @@ static inline void internal_poll_ob_go_home( struct SEventStruct *evt )
                 // wait for finishing of movement
 
                 // check coordinates
-                res = internal_procedure_coordinate_check_poll(evt);
+                res = internal_ob_helper_check_skipped_step( evt, CMD_OBSA_GO_HOME );
                 if ( res )
-                {
-                    if ( res == 1 )                                 // if coordinate readout is available from front-end
-                    {
-                        if ( internal_procedure_coordinate_check_crt_coord(SEQ_MAX_COORDDEV_OUTBAND, false) )
-                        {
-                            // missed step detected
-                            cnc.status.flags.f.err_step = 1;
-                            cnc.status.outband.params.gohome.m_fail += 100;     // failure ctr is decreased with 100 at each 10ms. so failure can be accumulated if problem isn't solved
-                            if ( cnc.status.outband.params.gohome.m_fail > (SEQ_MAX_MOVEMENT_RETRIALS * 100) )
-                            {
-                                cnc.status.flags.f.err_code = GENFAULT_TABLE_STUCK;
-                                cnc.status.flags.f.err_fatal = 1;
-                                goto _error_exit;
-                            }
-                            // stop everything - but maintain procedure status
-                            // this will updagte the coordinates also
-                            internal_stop( true );
-                            res = motion_sequence_crt_seqID();              // get the failed sequence id
-                            if ( (res != 1) && (res != 2) )
-                                goto _error_exit;
-                            internal_ob_helper_gohome_setsequence( res );   // regenerate movement sequences
-                            motion_sequence_start();                        // restart sequences
-                        }
-                        else if ( cnc.status.outband.params.gohome.m_fail )
-                        {
-                            cnc.status.outband.params.gohome.m_fail--;
-                        }
-                    }
-                    else                                            // if coordinate readout failed
-                        goto _error_exit;
-                }
+                    goto _error_exit;
 
                 // see if procedure is finished
                 if ( motion_sequence_check_run()== false )
@@ -792,17 +902,6 @@ static inline void internal_poll_ob_go_home( struct SEventStruct *evt )
                     // finish the command by stopping and updating everything
                     internal_stop( false );
                     internal_ob_helper_setstate_succeed();
-                }
-
-                // trigger coordinate check
-                if ( evt->timer_tick_100us )
-                {
-                    cnc.status.outband.params.gohome.ccheck--;
-                    if ( cnc.status.outband.params.gohome.ccheck == 0 )
-                    {
-                        cnc.status.outband.params.gohome.ccheck = SEQ_PERIOD_COORD_CHK_OUTBAND;
-                        internal_procedure_coordinate_check_entry();
-                    }
                 }
 
                 break;
@@ -877,8 +976,32 @@ static inline void internal_poll_ob_freerun( struct SEventStruct *evt )
     }
 }
 
-static inline internal_poll_ob_find_org( struct SEventStruct *evt )
+static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
 {
+    // check separatelly for endpoint touch
+    if ( HW_FrontEnd_Event() && ( cnc.status.outband.state == obstat_forg_search) )
+    {
+        uint32 tmask = 0;
+        int res = 0;
+
+        motion_sequence_stop();                 // stop all the runs
+        if ( front_end_check_op_busy() )
+            res = front_end_sync_event_loop();  // wait till front-end sends the touch mask
+        if ( res )
+            goto _fatal_error_exit;
+        front_end_get_touched_list( &tmask );
+        cnc.status.outband.params.findorg.axis_mask &= ~tmask;
+        if ( cnc.status.outband.params.findorg.axis_mask )              // if there are unfinished axis - search for them
+        {
+            internal_ob_helper_forg_search_setup( cnc.status.outband.params.findorg.axis_mask );
+        }
+        else                                                            // else 
+        {
+            cnc.status.outband.state++;
+            front_end_coordinate_reset_to_max();
+        }
+    }
+    else
     if ( evt->timer_tick_100us || evt->fe_op_completed )
     {
         int res;
@@ -926,30 +1049,6 @@ static inline internal_poll_ob_find_org( struct SEventStruct *evt )
                     }
                 }
                 break;
-            case obstat_forg_search:
-                if ( HW_FrontEnd_Event() )
-                {
-                    uint32 tmask = 0;
-
-                    motion_sequence_stop();                 // stop all the runs
-                    res = 0;
-                    if ( front_end_check_op_busy() )
-                        res = front_end_sync_event_loop();  // wait till front-end sends the touch mask
-                    if ( res )
-                        goto _fatal_error_exit;
-                    front_end_get_touched_list( &tmask );
-                    cnc.status.outband.params.findorg.axis_mask &= ~tmask;
-                    if ( cnc.status.outband.params.findorg.axis_mask )              // if there are unfinished axis - search for them
-                    {
-                        internal_ob_helper_forg_search_setup( cnc.status.outband.params.findorg.axis_mask );
-                    }
-                    else                                                            // else 
-                    {
-                        cnc.status.outband.state++;
-                        front_end_coordinate_reset_to_max();
-                    }
-                }
-                break;
             case obstat_forg_finalize:
                 if ( evt->fe_op_completed )
                 {
@@ -964,12 +1063,71 @@ static inline internal_poll_ob_find_org( struct SEventStruct *evt )
                     }
                 }
                 break;
+            default:
+                break;
         }
     }
     return;
 _fatal_error_exit:
     cnc.status.flags.f.err_fatal = 1;
     cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
+_error_exit:
+    internal_stop( false );                            // procedure failed
+    internal_ob_helper_setstate_failed();
+}
+
+static inline void internal_poll_ob_findZ(  struct SEventStruct *evt )
+{
+    // check separatelly for probe touch
+    if ( HW_FrontEnd_Event() && (cnc.status.outband.state == obstat_findz_search) )
+    {
+        internal_stop( true );                                  // stop the run and update coordinates if mismatch
+        motion_get_crt_coord( &cnc.status.outband.probe.poz );  // save the pozition
+        cnc.status.outband.probe.valid = true;
+        // set up for home run
+        cnc.status.outband.command.cmd_type = CMD_OBSA_GO_HOME;
+        cnc.status.outband.params.gohome.m_fail = 0;
+        cnc.status.outband.params.gohome.ccheck = SEQ_PERIOD_COORD_CHK_OUTBAND;
+        cnc.status.outband.state = obstat_home_motion;
+        internal_ob_helper_gohome_setsequence( 1 );
+    }
+    else
+    if ( evt->timer_tick_100us || evt->fe_op_completed )
+    {
+        int res;
+        switch ( cnc.status.outband.state )
+        {
+            case obstat_findz_spindledn:
+                // wait for spindle power down
+                res = internal_procedure_spindle_pwrdown_poll(evt);
+                if ( res == 0 )                                     // spindle procedure not finished
+                    return;
+                if ( res == 1 )                                     // procedure finished with success
+                {
+                    internal_ob_helper_findZ_goto_setup( 0 );
+                    cnc.status.outband.state++;                     
+                    break;
+                }
+                goto _error_exit;
+            case obstat_findz_goXY:
+                // wait to reach XY
+
+                // check coordinates
+                res = internal_ob_helper_check_skipped_step( evt, CMD_OBSA_FIND_Z_ZERO );
+                if ( res )
+                    goto _error_exit;
+
+                if ( motion_sequence_check_run() == false )     // reached the position
+                {
+                    internal_ob_helper_findZ_goto_setup( 1 );
+                    cnc.status.outband.state++;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    return;
 _error_exit:
     internal_stop( false );                            // procedure failed
     internal_ob_helper_setstate_failed();
@@ -1110,7 +1268,7 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
             case CMD_OBSA_SETUP_PROBE_POZ:      res = internal_outband_probe_poz( cmd ); break;
             case CMD_OBSA_FIND_ORIGIN:          res = internal_outband_find_origin(); break;
             case CMD_OBSA_GO_HOME:              res = internal_outband_gohome(); break;
-            case CMD_OBSA_FIND_Z_ZERO:
+            case CMD_OBSA_FIND_Z_ZERO:          res = internal_outband_findZzero(); break;
             case CMD_OBSA_STEP:                 res = internal_outband_step( cmd ); break;
             case CMD_OBSA_FREERUN:              res = internal_outband_freerun( cmd ); break;
             case CMD_OBSA_START:
@@ -1208,6 +1366,7 @@ static inline void local_poll_outbands( struct SEventStruct *evt )
         case CMD_OBSA_GO_HOME: internal_poll_ob_go_home( evt ); break;
         case CMD_OBSA_FREERUN: internal_poll_ob_freerun( evt ); break;
         case CMD_OBSA_FIND_ORIGIN: internal_poll_ob_find_org( evt ); break;
+        case CMD_OBSA_FIND_Z_ZERO: internal_poll_ob_findZ( evt ); break;
     }
 
 }

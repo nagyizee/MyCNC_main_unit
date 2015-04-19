@@ -1437,6 +1437,8 @@ struct SSpindleSimu
     int resp_time;
     int poll_ctr;
 
+    struct SStepCoordinates coord_snapshot;
+
     bool    spindle_on;
     int     spindle_set_speed;
     int     spindle_crt_speed;
@@ -1546,6 +1548,13 @@ void mainw::HW_wrp_front_end_simu()
         return;
 
     ssimu.poll_ctr++;
+    if ( (ssimu.poll_ctr == 2) && (ssimu.cmd_in_run == SSIMU_CMD_GET_COORD) )
+    {
+        ssimu.coord_snapshot.coord[0] = hw_coords.coord[COORD_X];
+        ssimu.coord_snapshot.coord[1] = hw_coords.coord[COORD_Y];
+        ssimu.coord_snapshot.coord[2] = hw_coords.coord[COORD_Z];
+        ssimu.coord_snapshot.coord[3] = hw_coords.coord[COORD_A];
+    }
 
     // make message delay simulation
     if ( ssimu.resp_time )
@@ -1596,9 +1605,9 @@ void mainw::HW_wrp_front_end_simu()
                     uint8 sign[3];
                     uint8 i;
 
-                    coords.coord[0] = hw_coords.coord[COORD_X];
-                    coords.coord[1] = hw_coords.coord[COORD_Y];
-                    coords.coord[2] = hw_coords.coord[COORD_Z];
+                    coords.coord[0] = ssimu.coord_snapshot.coord[COORD_X];
+                    coords.coord[1] = ssimu.coord_snapshot.coord[COORD_Y];
+                    coords.coord[2] = ssimu.coord_snapshot.coord[COORD_Z];
                     for ( i=0; i<3; i++ )
                     {
                         if ( coords.coord[i] < 0 )
