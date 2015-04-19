@@ -479,14 +479,17 @@ void StepTimerIntrHandler (void)
                     StepDBG_SegmentFinished();
     
                     // release element
-                    isr.stepper_fifo.r++;
-                    if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
-                        isr.stepper_fifo.r = 0;
-                    isr.stepper_fifo.c--;
-    
-                    // check for the next
-                    if ( isr.stepper_fifo.c )
-                        local_isr_fetch_new_action();
+                    if (isr.stepper_fifo.c)
+                    {
+                        isr.stepper_fifo.r++;
+                        if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
+                            isr.stepper_fifo.r = 0;
+                        isr.stepper_fifo.c--;
+
+                        // check for the next
+                        if ( isr.stepper_fifo.c )
+                            local_isr_fetch_new_action();
+                    }
                 }
                 n--;
             }
@@ -611,6 +614,7 @@ void stepper_stop()
     isr.stepper_fifo.w = isr.stepper_fifo.r;        // preserve read pointer to be able to retreive the last executed sequence
     isr.request = 0;
     isr.request_on_hold = false;
+    isr.state = MCISR_STATUS_IDLE;
     __enable_interrupt();
 }
 
