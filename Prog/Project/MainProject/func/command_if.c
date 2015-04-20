@@ -373,7 +373,7 @@ static inline int internal_sr_ack_stop( struct ScmdIfResponse *response )
 
 static int internal_sr_dump_coordinates( uint8 resp_type, struct ScmdIfResponse *response )
 {
-    // [ACK][0x8C][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][rrrr rrrr][rrrr rrrr][cksum]
+    // [ACK][0x8C][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][cmdIDex][cmdIDq][cksum]
     uint8 cksum = (uint8)(COMMCKSUMSTART);
     uint8 data;
     int i;
@@ -405,10 +405,10 @@ static int internal_sr_dump_coordinates( uint8 resp_type, struct ScmdIfResponse 
         comm_wrChar(data);
         internal_add_out_cksum( &cksum, data );
     }
-    data = ((response->resp.getCoord.rpm >> 8) & 0xff);
+    data = response->resp.getCoord.cmdIDex;
     comm_wrChar(data);
     internal_add_out_cksum( &cksum, data );
-    data = (response->resp.getCoord.rpm & 0xff);
+    data = response->resp.getCoord.cmdIDq;
     comm_wrChar(data);
     internal_add_out_cksum( &cksum, data );
     comm_wrChar( cksum );
@@ -417,31 +417,26 @@ static int internal_sr_dump_coordinates( uint8 resp_type, struct ScmdIfResponse 
 
 static inline int internal_sr_ack_status( struct ScmdIfResponse *response )
 {
-    // [ACK][0x84][GSfR rscc][cmdIDex][cmdIDq][freesp][cksum]
+    // [ACK][0x85][  IB  prcc][GSFs gggg][freesp][cmdIDex][cmdIDq][cksum]
     uint8 cksum = (uint8)(COMMCKSUMSTART);
     if ( comm_cmd_GetOutFree() < 7 )
         return -1;
 
     comm_wrChar( RESP_ACK );
-    comm_wrChar( 0x84 );
-    internal_add_out_cksum( &cksum, 0x84 );
+    comm_wrChar( 0x85 );
+    internal_add_out_cksum( &cksum, 0x85 );
 
-    comm_wrChar( (uint8)response->resp.status.s_flags.val );
-    internal_add_out_cksum( &cksum, (uint8)response->resp.status.s_flags.val );
+    comm_wrChar( response->resp.status.status_byte );
+    internal_add_out_cksum( &cksum, response->resp.status.status_byte );
+    comm_wrChar( response->resp.status.fail_byte );
+    internal_add_out_cksum( &cksum, response->resp.status.fail_byte );
+    comm_wrChar( (uint8)response->resp.status.freeSpace );
+    internal_add_out_cksum( &cksum, (uint8)response->resp.status.freeSpace );
     comm_wrChar( response->resp.status.cmdIDex );
     internal_add_out_cksum( &cksum, response->resp.status.cmdIDex );
     comm_wrChar( response->resp.status.cmdIDq );
     internal_add_out_cksum( &cksum, response->resp.status.cmdIDq );
-    if ( response->resp.status.s_flags.f.General_fault )
-    {
-        comm_wrChar( response->resp.status.fault_code );
-        internal_add_out_cksum( &cksum, response->resp.status.fault_code );
-    }
-    else
-    {
-        comm_wrChar( (uint8)response->resp.status.freeSpace );
-        internal_add_out_cksum( &cksum, (uint8)response->resp.status.freeSpace );
-    }
+
     comm_wrChar( cksum );
     return 0;
 }
@@ -637,10 +632,13 @@ void cmdif_init(void)
 
 void cmdif_poll( struct SEventStruct *evt )
 {
-    uint32 in_size;
+    if ( evt->timer_tick_100us == 0 )       // limmit call nr on this poll because it is unnecessary time consuming
+        return;
 
     do
     {
+        uint32 in_size;
+
         if ( comm_cmd_poll() == COMFLAG_OVERFLOW )
         {
             comm_cmd_InFlush();

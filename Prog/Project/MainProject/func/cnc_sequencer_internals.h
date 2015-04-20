@@ -70,6 +70,7 @@
         struct SStepCoordinates     z_probe;            // position of the tooltip probe
         uint16                      feed_max;           // maximum allowed feed speed
         uint16                      feed_rapid;         // rapid transition speed used for internal sequences
+        int32                       spindle_scale;      // scale the spindle speed up/down +/- 200%
     };
     
 
@@ -130,15 +131,18 @@
             uint32 err_code:8;          // fatal error code (valid if err_fatal is set)
             uint32 err_spjam:1;         // spindle jam detected
             uint32 err_step:1;          // missed step detected
+            uint32 err_starv:1;         // motion core starvation
             uint32 err_fatal:1;         // fatal error produced - everything halted
 
             uint32 run_outband:1;       // running an outband command 
             uint32 run_program:1;       // running a program from inband fifo
+            uint32 run_paused:1;        // inband sequence paused
             uint32 run_ob_failed:1;     // set if an outband command failed - reset at new command
             uint32 run_ob_suceeded:1;   // set if an outband is finished with success - reset at new command
 
             uint32 stat_restarted:1;    // set to 1 at start-up, reset at the first status read
             uint32 stat_ep_set:1;       // 0 at start-up, set when endpoint finding command is terminated or if no front-end and max travel is set up
+            uint32 stat_bpress:1;       // action because of button press
 
             uint32 spindle_pwr:1;       // set if spindle is powered up and ready to go
             uint32 spindle_on:1;        // set when spindle is running
@@ -173,12 +177,19 @@
         }                       params;
     };
 
+    struct SCNCMisc
+    {
+        uint32 spindle_speed;                           // speed set by inband or outband (not scaled) - Note: this doesn't reflect the ON status
+        uint32 coord_dump_ctr;                          // coordinate dump period. set to 0 to disable dump
+    };
+
     struct SCNCStatus
     {
         struct SCommandStatus   cmd;            // generic command status
         union SStatusFlags      flags;          // cnc sequencer status flags
         struct SCNCOutband      outband;        // outband command execution status
         struct SCNCProcedure    procedure;      // internal procedure
+        struct SCNCMisc         misc;           // spindle setup
     };
 
 

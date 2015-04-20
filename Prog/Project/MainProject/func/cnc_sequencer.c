@@ -303,6 +303,7 @@ static void internal_send_simple_ack( struct ScmdIfCommand *cmd )
     struct ScmdIfResponse resp;
     resp.cmd_type = cmd->cmd_type;
     resp.resp_type = RESP_ACK;
+    resp.resp.getCoord.has_data = 0;
     cmdif_confirm_reception(&resp);
 }
 
@@ -490,6 +491,23 @@ static int internal_ob_helper_check_skipped_step( struct SEventStruct *evt, uint
     return 0;
 }
 
+static void internal_ob_helper_send_coordinates( uint32 msg_type )
+{
+    struct ScmdIfResponse resp;
+    struct ScmdIfCommand *ibcmd;
+
+    ibcmd = internal_fifo_get_last_introduced();
+
+    resp.cmd_type = CMD_OB_GET_CRT_COORD;
+    resp.resp_type = msg_type;
+    resp.resp.getCoord.has_data = 1;
+    resp.resp.getCoord.cmdIDex = motion_sequence_crt_cmdID();
+    resp.resp.getCoord.cmdIDq = (ibcmd != NULL) ? ibcmd->cmdID : 0x00;
+    motion_get_crt_coord( &resp.resp.getCoord.coord );
+
+    cmdif_confirm_reception(&resp);
+}
+
 static void internal_ob_helper_setstate_started(void)
 {
     cnc.status.flags.f.run_outband = 1;
@@ -545,7 +563,6 @@ int internal_stop( bool leave_ob )
         }
         else
         {
-            struct SStepCoordinates *real_coord;
             motion_get_crt_coord( &cnc.status.procedure.params.getcoord.coord_snapshot );
             if (internal_procedure_coordinate_check_crt_coord( 1, true ))
                 motion_set_crt_coord( &cnc.status.procedure.params.getcoord.coord_fe );
@@ -559,7 +576,6 @@ int internal_stop( bool leave_ob )
     if ( leave_ob == false )
     {
         cnc.status.flags.f.run_outband = 0;
-        cnc.status.flags.f.run_program = 0;
 
         cnc.status.outband.command.cmd_type = 0;
         cnc.status.outband.state = 0;
@@ -862,8 +878,138 @@ static inline int internal_outband_stop( void )
         resp.resp.stop.cmdIDq = ibElem->cmdID; 
 
     internal_stop(false);
+    internal_fifo_flush();
+    motion_feed_scale( 0 );
+    cnc.status.flags.f.run_program = 0;
+    cnc.status.flags.f.run_paused = 0;
+    cnc.status.misc.spindle_speed = 0;
 
     resp.resp.stop.cmdIDex = motion_sequence_crt_cmdID();
+    cmdif_confirm_reception(&resp);
+    return RESP_ACK;
+}
+
+
+static inline int internal_outband_scale_feed( struct ScmdIfCommand *cmd ) 
+{
+    if ( (cmd->cmd.scale_feed > 200) || (cmd->cmd.scale_feed < -200) )
+        return RESP_INV;
+
+    motion_feed_scale( cmd->cmd.scale_feed );
+
+    internal_send_simple_ack( cmd );
+    return RESP_ACK;
+}
+
+
+static inline int internal_outband_scale_spindle( struct ScmdIfCommand *cmd ) 
+{
+    if ( (cmd->cmd.scale_spindle > 200) || (cmd->cmd.scale_spindle < -200) )
+        return RESP_INV;
+
+    if ( cnc.status.flags.f.spindle_on )
+    {
+        if ( cnc.status.flags.f.run_outband )
+            return RESP_PEN;
+
+        internal_ob_helper_setstate_started();
+
+        // TODO - implementation
+    }
+    else
+    {
+        cnc.setup.spindle_scale = cmd->cmd.scale_spindle;
+    }
+
+    internal_send_simple_ack( cmd );
+    return RESP_ACK;
+}
+
+
+static inline int internal_outband_get_coord( struct ScmdIfCommand *cmd )
+{
+    if ( cmd->cmd.get_coord.is_setup )
+    {
+        if ( cmd->cmd.get_coord.dmp_enable )
+            cnc.status.misc.coord_dump_ctr = 10;
+        else
+            cnc.status.misc.coord_dump_ctr = 0;
+
+        internal_send_simple_ack( cmd );
+        return RESP_ACK;
+    }
+
+    internal_ob_helper_send_coordinates( RESP_ACK );
+    return RESP_ACK;
+}
+
+
+static inline int internal_outband_get_crt_cmdID( void )
+{
+    struct ScmdIfResponse resp;
+
+    resp.cmd_type = CMD_OB_GET_CRT_CMD_ID;
+    resp.resp_type = RESP_ACK;
+    resp.resp.cmdID = motion_sequence_crt_cmdID();
+    cmdif_confirm_reception(&resp);
+    return RESP_ACK;
+}
+
+
+static inline int internal_outband_get_status( void )
+{
+    struct ScmdIfResponse resp;
+    struct ScmdIfCommand *ibcmd;
+
+    ibcmd = internal_fifo_get_last_introduced();
+
+    resp.cmd_type = CMD_OB_GET_STATUS;
+    resp.resp_type = RESP_ACK;
+    resp.resp.status.cmdIDex = motion_sequence_crt_cmdID();
+    resp.resp.status.cmdIDq = (ibcmd != NULL) ? ibcmd->cmdID : 0x00;
+    resp.resp.status.freeSpace = internal_fifo_free();
+
+    // prepare status byte
+    if ( cnc.status.flags.f.run_outband )
+        resp.resp.status.status_byte = 0x03;        //  cc = 11
+    else if ( cnc.status.flags.f.run_ob_failed )
+        resp.resp.status.status_byte = 0x01;        //  cc = 01
+    else
+        resp.resp.status.status_byte = 0x00;        //  cc = 00
+
+    resp.resp.status.status_byte |= cnc.status.flags.f.run_program ? (1 << 2) : 0x00;       // r
+    resp.resp.status.status_byte |= cnc.status.flags.f.run_paused ? (1 << 3) : 0x00;        // p
+    resp.resp.status.status_byte |= cnc.status.flags.f.stat_bpress ? (1 << 4) : 0x00;       // B
+    resp.resp.status.status_byte |= cnc.status.flags.f.stat_restarted ? (1 << 5) : 0x00;    // I
+
+    // prepare failure byte
+    resp.resp.status.fail_byte  = cnc.status.flags.f.err_code & 0x0f;
+    resp.resp.status.fail_byte |= cnc.status.flags.f.err_starv ? (1 << 4) : 0x00;           // s
+    resp.resp.status.fail_byte |= cnc.status.flags.f.err_step ? (1 << 5) : 0x00;            // F
+    resp.resp.status.fail_byte |= cnc.status.flags.f.err_spjam ? (1 << 6) : 0x00;           // S
+    resp.resp.status.fail_byte |= cnc.status.flags.f.err_fatal ? (1 << 7) : 0x00;           // G
+
+    // reset flags
+    cnc.status.flags.f.stat_bpress = 0;
+    cnc.status.flags.f.err_starv = 0;
+    cnc.status.flags.f.err_step = 0;
+    cnc.status.flags.f.err_spjam = 0;
+
+    cmdif_confirm_reception(&resp);
+    return RESP_ACK;
+}
+
+
+static inline int internal_outband_get_probe( void )
+{
+    struct ScmdIfResponse resp;
+
+    if ( cnc.status.outband.probe.valid == false )
+        return RESP_INV;
+
+    resp.cmd_type = CMD_OB_GET_PROBE_TOUCH;
+    resp.resp_type = RESP_ACK;
+    resp.resp.touch = cnc.status.outband.probe.poz;
     cmdif_confirm_reception(&resp);
     return RESP_ACK;
 }
@@ -1058,6 +1204,7 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
                     {
                         motion_set_crt_coord( &cnc.setup.max_travel );
                         internal_stop(false);
+                        cnc.status.flags.f.stat_restarted = 0;
                         internal_ob_helper_setstate_succeed();
                         return;
                     }
@@ -1274,12 +1421,12 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
             case CMD_OBSA_START:
             case CMD_OB_PAUSE:
             case CMD_OB_STOP:                   res = internal_outband_stop(); break;
-            case CMD_OB_SCALE_FEED:
-            case CMD_OB_SCALE_SPINDLE:
-            case CMD_OB_GET_CRT_COORD:
-            case CMD_OB_GET_CRT_CMD_ID:
-            case CMD_OB_GET_STATUS:
-            case CMD_OB_GET_PROBE_TOUCH:    break;
+            case CMD_OB_SCALE_FEED:             res = internal_outband_scale_feed( cmd ); break;
+            case CMD_OB_SCALE_SPINDLE:          res = internal_outband_scale_spindle( cmd ); break;
+            case CMD_OB_GET_CRT_COORD:          res = internal_outband_get_coord( cmd ); break;
+            case CMD_OB_GET_CRT_CMD_ID:         res = internal_outband_get_crt_cmdID(); break;
+            case CMD_OB_GET_STATUS:             res = internal_outband_get_status(); break;
+            case CMD_OB_GET_PROBE_TOUCH:        res = internal_outband_get_probe(); break;
         }
     }
     if ( res != RESP_ACK )
@@ -1372,6 +1519,23 @@ static inline void local_poll_outbands( struct SEventStruct *evt )
 }
 
 
+static inline void local_poll_sequencer( struct SEventStruct *evt )
+{
+    // check for coordinate dump
+    if ( evt->timer_tick_10ms && cnc.status.misc.coord_dump_ctr )
+    {
+        cnc.status.misc.coord_dump_ctr--;
+        if ( cnc.status.misc.coord_dump_ctr == 0 )
+        {
+            cnc.status.misc.coord_dump_ctr = 10;
+            internal_ob_helper_send_coordinates( RESP_DMP );
+        }
+    }
+
+
+}
+
+
 void seq_callback_process_inband( uint32 seqType, uint32 value )
 {
 
@@ -1441,5 +1605,6 @@ void sequencer_poll( struct SEventStruct *evt )
     // event consumer polls
     local_sequencer_process_command(evt);
     local_poll_outbands( evt );
+    local_poll_sequencer( evt );
 }
 

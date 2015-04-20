@@ -124,7 +124,7 @@
 
 
     // internal automation and movements            - stop or pause command will cancel their execution and mark them as failed
-    #define CMD_OBSA_FIND_ORIGIN            0x11    // search the maximums of each axis. Origin will be this coordinate - maximum travel
+    #define CMD_OBSA_FIND_ORIGIN            0x11    // search the maximums of each axis. Origin will be maximum travel. "initial status" flag is cleared here
                                                     // - in case of front-end it will search the end points automatically. Master should assure that 
                                                     // milling head is cleared of any obstacle. Use the freerun commands.
                                                     // - if no front-end is present - this command will set up the current coordinates to max travel and returns 
@@ -177,8 +177,8 @@
 
     #define CMD_OB_PAUSE                    0x22    // pause execution of inband set, cancels the current command, stops the spindle. if no commands are running it does nothing
                                                     // - emergency button does the same
-                                                    // - pause will make other outband commands pending till the spindle stop and coordinate update from frontend
-                                                    //   will not be finished
+                                                    // - pause is synchronous, ACK will be transmitted at finishing of the operation
+                                                    //   use adequated timeout period.
                                                     // IN:      [0xAA][0x22][cksum]
                                                     // OUT:     [ACK][0x81][cmdID][cksum] - started executing, cmdID of the command currenty interrupted
 
@@ -197,6 +197,7 @@
                                                     //          [INV] - invalid data
 
     #define CMD_OB_SCALE_SPINDLE            0x25    // scale the spindle speed
+                                                    // command is async if spindle is in run
                                                     // IN:      [0xAA][0xA5][0x02][ssss ssss][ssss ssss][cksum]
                                                     //          ss...sss is in int16 format
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
@@ -206,7 +207,9 @@
     #define CMD_OB_GET_CRT_COORD            0x31    // returns the current coordinates. Has flag to activate auto coordinate send
                                                     // polling:
                                                     // IN:      [0xAA][0x31][cksum]
-                                                    // OUT:     [ACK][0x8C][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][rrrr rrrr][rrrr rrrr][cksum]
+                                                    // OUT:     [ACK][0x8C][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][cmdIDex][cmdIDq][cksum]
+                                                    //                      cmdIDex - command ID of command currenty executed, or interrupted by stop command or internal failure
+                                                    //                      cmdIDq  - the last command ID introduced in the fifo
                                                     // setting up dump:
                                                     // IN:      [0xAA][0xB1][0x01][0000 000s][cksum]        - s=1 dump is active
                                                     // OUT:     [ACK][0x00]
@@ -219,18 +222,24 @@
                                                     //         - currently executed (or stopped) cmdID 
                                                     //         - command fifo free space
                                                     // IN:      [0xAA][0x33][cksum]
-                                                    // OUT:     [ACK][0x84][GiSf Rscc][cmdIDex][cmdIDq][freesp][cksum]
+                                                    // OUT:     [ACK][0x85][  IB  prcc][GSFs gggg][freesp][cmdIDex][cmdIDq][cksum]
+                                                    // 
                                                     //              cc -  00 - no outband operation in execution, or last one succeeded
                                                     //                    01 - last outband operation failed
                                                     //                    11 - outband operation in progress
+                                                    //              r  - inband sequencer is running
+                                                    //              p  - inband sequencer is paused 
+                                                    // 
+                                                    //              B  - button press changed running status -> read the cc, r, p to discover what happened
+                                                    //              I  - initial status - marking a fresh reset. cleared when CMD_OBSA_FIND_ORIGIN is executed
+                                                    // 
                                                     //              s  - starvation detected
-                                                    //              R  - sequencer is running
-                                                    //              f  - coordinate fault (missed steps) detected but can be fixed (hopefully - otherwise general failure)
-                                                    //              S  - spindle stuck detected but fixed
-                                                    //              i  - initial status - marking a fresh reset
-                                                    //              G  - general failure - must read error code  --- If this is set [freesp] holds the error code
+                                                    //              F  - coordinate fault detected (missed steps) - trying to fix it (hopefully - otherwise general failure)
+                                                    //              S  - spindle stuck detected but fixed - trying to fix it
+                                                    //              G  - general failure - must read error code  --- If this is set [gggg] holds the error code
                                                     //                  -- when this happens, sequencer stops and flushes everything
                                                     //                  -- main causes: unrecoverable spindle stuck / missing front-end link / unrecoverable missed step
+                                                    //                  -- NOTE: system must be reset, and checked mechanically and for faulty connections
 
     #define CMD_OB_GET_PROBE_TOUCH          0x34    // returns the touch point of the probe.
                                                     // IN:      [0xAA][0x34][cksum]
@@ -342,30 +351,16 @@
     struct SCmdResp_getCoord
     {
         uint16  has_data;       // structure has valid data
-        uint16  rpm;            // measured rpm
+        uint8   cmdIDq;         // last command ID introduced in inband queue
+        uint8   cmdIDex;        // command ID in execution
         struct  SStepCoordinates coord;
     };
 
     struct SCmdResp_status
     {
-        union
-        {
-            struct
-            {
-                uint8 ob_op_progress:2;             // 00 - no outband operation in execution, or last one succeeded
-                                                    // 01 - last outband operation failed
-                                                    // 11 - outband operation in progress
-                uint8 starvation:1;                 // inband fifo starved
-                uint8 run_seq:1;                    // sequencer is running inbands
-                uint8 step_fault:1;                 // missed step detected
-                uint8 spindle_fault:1;              // spindle stuck detected
-                uint8 initial:1;                    // initial status - marking a fresh reset
-                uint8 General_fault:1;              // general fault - system stopped automatically, fifos flushed - check cmdIDex and cmdIDq
-            } f;
-            uint8 val;
-        } s_flags;
 
-        uint8   fault_code;                     // general fault code ( see GENFAULT_XXX )
+        uint8   status_byte;
+        uint8   fail_byte;
         uint8   cmdIDex;                        // command ID currently in execution
         uint8   cmdIDq;                         // last command ID in queue
 

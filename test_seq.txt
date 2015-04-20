@@ -63,3 +63,16 @@
 [H][C_stpp][P_24000,9200][S]
 [H][C_fzzr][S]
 
+#get status
+[H][C_gsts][S]
+
+#get coordinates
+[H][C_gcrd][S]
+[H][C_gcrd][P_1][S]
+[H][C_gcrd][P_0][S]
+
+
+
+
+
+
