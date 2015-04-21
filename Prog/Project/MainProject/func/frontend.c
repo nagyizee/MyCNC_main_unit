@@ -531,6 +531,7 @@ _error_exit:
         {
             if ( fe.no_change )
             {
+                fe.no_change = false;
                 evt->fe_op_completed = 1;
                 fe.op = feop_none;
             }

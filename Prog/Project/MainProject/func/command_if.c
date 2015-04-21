@@ -90,6 +90,7 @@ static int internal_check_command( uint32 cmd_id, uint32 cmd_len, bool check_ib 
                 return 0;   // ok
             break;
         case CMD_OBSA_FREERUN:
+        case CMD_OBSA_SPINDLE:
             if ( check_ib )
                 return -1;
             if ( cmd_len == 2 )
@@ -190,6 +191,14 @@ static inline int internal_pc_freerun( struct ScmdIfCommand *command )
     command->cmd.frun.no_limit = ( comm_buffer[0] & 0x20 ) ? true : false;
     command->cmd.frun.dir = ( comm_buffer[0] & 0x10 ) ? 1 : 0;
     command->cmd.frun.feed = ( (comm_buffer[0] & 0x0f)<<8) | comm_buffer[1];
+    return 0;
+}
+
+static inline int internal_pc_ob_spindle( struct ScmdIfCommand *command )
+{
+    //                           0
+    // [0xAA][0x96][0x02] - [rrrr rrrr][rrrr rrrr] - [cksum]
+    command->cmd.ib_spindle_speed = (comm_buffer[0]<<8) | (comm_buffer[1]);
     return 0;
 }
 
@@ -507,6 +516,7 @@ static int internal_parse_command( uint32 cmd_id, uint8 *buffer, uint32 plen, st
         case CMD_OBSA_FIND_Z_ZERO:      res = 0; break;
         case CMD_OBSA_STEP:             res = internal_pc_step( command ); break;
         case CMD_OBSA_FREERUN:          res = internal_pc_freerun( command ); break;
+        case CMD_OBSA_SPINDLE:          res = internal_pc_ob_spindle( command ); break;
         case CMD_OBSA_START:            res = 0; break;
         case CMD_OB_PAUSE:              res = 0; break;
         case CMD_OB_STOP:               res = 0; break;

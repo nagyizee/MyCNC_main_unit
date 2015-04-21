@@ -262,31 +262,67 @@ static int internal_procedure_spindle_pwrdown_entry( bool full_pwrdown )
     return 0;
 }
 
-static int internal_procedure_spindle_pwrdown_poll( struct SEventStruct *evt )
+static int internal_procedure_spindle_poll( struct SEventStruct *evt )
 {
+    if ( (evt->timer_tick_10ms) &&
+         (cnc.status.procedure.procID == procid_spindle_pwrup) &&
+         (cnc.status.procedure.params.spindle_off > 1 ) )
+    {
+        cnc.status.procedure.params.spindle_off--;
+        if ( cnc.status.procedure.params.spindle_off == 1 )
+        {
+            cnc.status.procedure.params.spindle_off = 0;
+            front_end_spindle_speed( cnc.status.misc.spindle_speed );   // 3sec is over, send the spindle speed
+            cnc.status.flags.f.spindle_on = 1;                          // consider it on, even if it fails to be able to stop it
+        }
+    }
+
     if ( evt->fe_op_completed )
     {
         if ( evt->fe_op_failed )
         {
+            if ( evt->fe_spindle_jam == 0 )
+            {
+                cnc.status.flags.f.err_fatal = 1;
+                cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
+            }
+            else
+                cnc.status.flags.f.err_spjam = 1;
+
             cnc.status.procedure.procID = procid_none;
-            cnc.status.flags.f.err_fatal = 1;
-            cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
             return -1;
         }
         else
         {
-            cnc.status.flags.f.spindle_on = 0;
-            if ( cnc.status.procedure.params.spindle_off )      // if power needs to be turned off
+            switch ( cnc.status.procedure.procID )
             {
-                cnc.status.procedure.params.spindle_off--;
-                front_end_spindle_power( false );
-                cnc.status.flags.f.spindle_pwr = 0;             // assume that it will succeed, otherwise gen-fault, needs reset
-                return 0;
-            }
-            else
-            {
-                cnc.status.procedure.procID = procid_none;      // else return success
-                return 1; 
+                case procid_spindle_pwrdown:
+                    cnc.status.flags.f.spindle_on = 0;
+                    if ( cnc.status.procedure.params.spindle_off )      // if power needs to be turned off
+                    {
+                        cnc.status.procedure.params.spindle_off--;
+                        front_end_spindle_power( false );
+                        cnc.status.flags.f.spindle_pwr = 0;             // assume that it will succeed, otherwise gen-fault, needs reset
+                        return 0;
+                    }
+                    else
+                    {
+                        cnc.status.procedure.procID = procid_none;      // else return success
+                        return 1; 
+                    }
+                    break;
+                case procid_spindle_pwrup:
+                    if ( cnc.status.procedure.params.spindle_off )      // spindle power up action is sent
+                    {
+                        cnc.status.flags.f.spindle_pwr = 1;
+                        cnc.status.procedure.params.spindle_off = 300;  // now we have to wait 3sec. for the power regulator to start up till spindle speed can be set
+                    }
+                    else                                                // else the completion was for spindle speed command
+                    {
+                        cnc.status.procedure.procID = procid_none;      // return success
+                        return 1; 
+                    }
+                    break;
             }
         }
     }
@@ -294,6 +330,35 @@ static int internal_procedure_spindle_pwrdown_poll( struct SEventStruct *evt )
 }
 
 
+static int internal_procedure_spindle_control_entry( uint32 rpm )
+{
+    if ( cnc.status.procedure.procID )
+    {
+        return -1;
+    }
+
+    cnc.status.misc.spindle_speed = rpm;
+    if ( rpm == 0 )
+    {
+        internal_procedure_spindle_pwrdown_entry(false);
+        return 0;
+    }
+
+    if ( cnc.status.flags.f.spindle_pwr == 0 )              // if spindle was powered down
+    {
+        front_end_spindle_power( true );                    // power it up
+        cnc.status.procedure.params.spindle_off = 1;        // instruct to power up the spindle unit
+    }
+    else
+    {
+        cnc.status.procedure.params.spindle_off = 0;
+        front_end_spindle_speed( rpm );                     // else set the rpm directly
+        cnc.status.flags.f.spindle_on = 1;                  // consider it on, even if it fails to be able to stop it
+    }
+
+    cnc.status.procedure.procID = procid_spindle_pwrup;
+    return 0;
+}
 
 
 
@@ -863,6 +928,33 @@ static inline int internal_outband_freerun( struct ScmdIfCommand *cmd )
 }
 
 
+static inline int internal_outband_spindle( struct ScmdIfCommand *cmd )
+{
+    // spindle control:
+    // - powers up the spindle unit if needed
+    // - sets the spindle speed
+    // do some checks
+    if ( cnc.status.flags.f.run_program || cnc.status.flags.f.run_outband )      
+        return RESP_PEN;
+    if ( (cmd->cmd.ib_spindle_speed > cnc.setup.spindle_max) ||
+        ((cmd->cmd.ib_spindle_speed < cnc.setup.spindle_min) && (cmd->cmd.ib_spindle_speed != 0)) )
+        return RESP_INV;
+
+    // set up the status of the procedure
+    if ( internal_procedure_spindle_control_entry( cmd->cmd.ib_spindle_speed ) )
+        return RESP_PEN;
+
+    internal_ob_helper_setstate_started();
+
+    cnc.status.outband.command = *cmd;
+    cnc.status.outband.state = 0;
+
+    // send acknowledge
+    internal_send_simple_ack( cmd );
+    return RESP_ACK;
+}
+
+
 static inline int internal_outband_stop( void )
 {
     struct ScmdIfResponse resp;
@@ -1024,7 +1116,7 @@ static inline void internal_poll_ob_go_home( struct SEventStruct *evt )
         {
             case obstat_home_preparation:
                 // wait for spindle power down
-                res = internal_procedure_spindle_pwrdown_poll(evt);
+                res = internal_procedure_spindle_poll(evt);
                 if ( res == 0 )                                     // spindle procedure not finished
                     return;
                 if ( res == 1 )                                     // procedure finished with success
@@ -1155,7 +1247,7 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
         {
             case obstat_forg_spindledn:
                 // wait for spindle power down
-                res = internal_procedure_spindle_pwrdown_poll(evt);
+                res = internal_procedure_spindle_poll(evt);
                 if ( res == 0 )                                     // spindle procedure not finished
                     return;
                 if ( res == 1 )                                     // procedure finished with success
@@ -1246,7 +1338,7 @@ static inline void internal_poll_ob_findZ(  struct SEventStruct *evt )
         {
             case obstat_findz_spindledn:
                 // wait for spindle power down
-                res = internal_procedure_spindle_pwrdown_poll(evt);
+                res = internal_procedure_spindle_poll(evt);
                 if ( res == 0 )                                     // spindle procedure not finished
                     return;
                 if ( res == 1 )                                     // procedure finished with success
@@ -1273,6 +1365,29 @@ static inline void internal_poll_ob_findZ(  struct SEventStruct *evt )
             default:
                 break;
         }
+    }
+    return;
+_error_exit:
+    internal_stop( false );                            // procedure failed
+    internal_ob_helper_setstate_failed();
+}
+
+
+static inline void internal_poll_ob_spindle( struct SEventStruct *evt )
+{
+    if ( evt->timer_tick_10ms || evt->fe_op_completed )
+    {
+        int res;
+
+        res = internal_procedure_spindle_poll(evt);
+        if ( res == 0 )                                     // spindle procedure not finished
+            return;
+        if ( res == 1 )                                     // procedure finished with success
+        {
+            internal_ob_helper_setstate_succeed();              
+            return;
+        }
+        goto _error_exit;
     }
     return;
 _error_exit:
@@ -1418,6 +1533,7 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
             case CMD_OBSA_FIND_Z_ZERO:          res = internal_outband_findZzero(); break;
             case CMD_OBSA_STEP:                 res = internal_outband_step( cmd ); break;
             case CMD_OBSA_FREERUN:              res = internal_outband_freerun( cmd ); break;
+            case CMD_OBSA_SPINDLE:              res = internal_outband_spindle( cmd ); break;
             case CMD_OBSA_START:
             case CMD_OB_PAUSE:
             case CMD_OB_STOP:                   res = internal_outband_stop(); break;
@@ -1514,6 +1630,7 @@ static inline void local_poll_outbands( struct SEventStruct *evt )
         case CMD_OBSA_FREERUN: internal_poll_ob_freerun( evt ); break;
         case CMD_OBSA_FIND_ORIGIN: internal_poll_ob_find_org( evt ); break;
         case CMD_OBSA_FIND_Z_ZERO: internal_poll_ob_findZ( evt ); break;
+        case CMD_OBSA_SPINDLE: internal_poll_ob_spindle( evt ); break;
     }
 
 }
@@ -1531,8 +1648,6 @@ static inline void local_poll_sequencer( struct SEventStruct *evt )
             internal_ob_helper_send_coordinates( RESP_DMP );
         }
     }
-
-
 }
 
 
@@ -1572,6 +1687,8 @@ void sequencer_init( bool restart )
     cnc.setup.home_poz      = cnc.setup.max_travel;
     cnc.setup.feed_rapid    = 1000;
     cnc.setup.feed_max      = 1500;
+    cnc.setup.spindle_max   = 30000;
+    cnc.setup.spindle_min   = 6000;
 
     // set up initial status
     cnc.status.cmd.last_coord = cnc.setup.max_travel;

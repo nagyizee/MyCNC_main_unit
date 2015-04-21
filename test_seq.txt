@@ -71,6 +71,11 @@
 [H][C_gcrd][P_1][S]
 [H][C_gcrd][P_0][S]
 
+#spindle control
+[H][C_spin][P_15000][S]
+[H][C_spin][P_0][S]
+
+
 
 
 

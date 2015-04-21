@@ -92,35 +92,33 @@
     #define CMD_OB_RESET                    0x55    // resets everything from fresh start state. Setup is needed after it. Overrides other standalone commands
                                                     // IN:      [0xAA][0x00][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted and reset is started
-                                                    //          [PEN] - if another is in execution
-                                                    //          [INV] - if sequencer is running
 
     #define CMD_OBSA_SETUP_MAX_TRAVEL       0x01    // set the maximum travels on each axis 
                                                     // sets the current cordinates also - recommended to call it when machine is at the absolute max. pozition 
                                                     // (defaults are 130x46x80x360)
                                                     // IN:      [0xAA][0x81][0x0a][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted
-                                                    //          [PEN] - if another is in execution
-                                                    //          [INV] - if sequencer is running / invalid data received
+                                                    //          [PEN] - if another is in execution or sequencer is running
+                                                    //          [INV] - invalid data received
 
     #define CMD_OBSA_SETUP_MAX_SPEEDS       0x02    // maximum allowed speed and fast transition speeds for internally generated sequences
                                                     // (defaults: max allowed: 1500mm/min, rapid: 1000mm/min)
                                                     // IN:      [0xAA][0x82][0x04][mmmm mmmm][mmmm mmmm][rrrr rrrr][rrrr rrrr][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted
-                                                    //          [PEN] - if another is in execution
-                                                    //          [INV] - if sequencer is running / invalid data received
+                                                    //          [PEN] - if another is in execution or sequencer is running
+                                                    //          [INV] - invalid data received
 
     #define CMD_OBSA_SETUP_HOME_POZ         0x03    // set the home/tool change pozition. Default is what is set for max travel.
                                                     // IN:      [0xAA][0x83][0x0a][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][zzzz zzzz][zzzz zzzz][zzzz aaaa][aaaa aaaa][aaaa aaaa][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted
-                                                    //          [PEN] - if another is in execution
-                                                    //          [INV] - if sequencer is running / invalid data received
+                                                    //          [PEN] - if another is in execution or sequencer is running
+                                                    //          [INV] - invalid data received
 
     #define CMD_OBSA_SETUP_PROBE_POZ        0x04    // set the X:Y position for tooltip probing. If not defined, find_Z_zero command will be rejected
                                                     // IN:      [0xAA][0x84][0x05][xxxx xxxx][xxxx xxxx][xxxx yyyy][yyyy yyyy][yyyy yyyy][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted
-                                                    //          [PEN] - if another is in execution
-                                                    //          [INV] - if sequencer is running / invalid data received
+                                                    //          [PEN] - if another is in execution or sequencer is running
+                                                    //          [INV] - invalid data received
 
 
     // internal automation and movements            - stop or pause command will cancel their execution and mark them as failed
@@ -131,41 +129,49 @@
                                                     // synchronously
                                                     // IN:      [0xAA][0x11][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
-                                                    //          [PEN] - if another operation is in execution
-                                                    //          [INV] - if sequencer is running / invalid data received
+                                                    //          [PEN] - if another operation is in execution or sequencer is running
+                                                    //          [INV] - invalid data received
 
     #define CMD_OBSA_GO_HOME                0x12    // go to start position, same as Home/ToolChange
                                                     // IN:      [0xAA][0x12][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
-                                                    //          [PEN] - if another operation is in execution
-                                                    //          [INV] - if sequencer is running / invalid data received
+                                                    //          [PEN] - if another operation is in execution or sequencer is running
+                                                    //          [INV] - invalid data received
 
     #define CMD_OBSA_FIND_Z_ZERO            0x13    // used for tool-tip finding. it will touch the Z probe, after this it will execute a go home procedure
                                                     // Note: be aware to clear any obstacle on XY plane at current heigth before executing this command
                                                     // IN:      [0xAA][0x13][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
-                                                    //          [PEN] - if another operation is in execution
-                                                    //          [INV] - if sequencer is running / invalid data received
+                                                    //          [PEN] - if another operation is in execution or sequencer is running
+                                                    //          [INV] - invalid data received
 
     #define CMD_OBSA_STEP                   0x14    // step axis
                                                     // Stop is recommended after stepping finished since it doesn't detect missing steps
                                                     // IN:      [0xAA][0x94][0x01][aaaa dddd][cksum]
                                                     //          aaaa - step bits for a/z/y/x,  dddd - direction bits for a/z/y/x
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
-                                                    //          [PEN] - if another operation is in execution
-                                                    //          [INV] - if sequencer is running / can not step
+                                                    //          [PEN] - if another operation is in execution or sequencer is running
+                                                    //          [INV] - can not step
     
     #define CMD_OBSA_FREERUN                0x15    // freerun command for the given axis. Only one axis is permitted at the same time.
                                                     // command is cancelled by stop command or by 10ms timeout. To run it continuously it should
-                                                    // be retransmitted in the timeout interval
-                                                    // IN:      [0xAA][0x94][0x02][aaLd ffff][ffff ffff][cksum]
+                                                    // be retransmitted in the timeout interval. 
+                                                    // Command can be retransmitted any time with different direction or feed speed, only the axis should remain the same
+                                                    // IN:      [0xAA][0x95][0x02][aaLd ffff][ffff ffff][cksum]
                                                     //          aa   - axis to be controlled
                                                     //          L    - if 1 then max travel is not used (proceed with care)
                                                     //          d    - direction: 1 - positive, 0 - negative
                                                     //          fff  - feed in mm/min
                                                     // OUT:     [ACK][0x00] - if accepted / operation started
-                                                    //          [PEN] - if another operation is in execution
-                                                    //          [INV] - if sequencer is running / can not step
+                                                    //          [PEN] - if another operation is in execution or sequencer is running
+                                                    //          [INV] - can not step
+
+    #define CMD_OBSA_SPINDLE                0x16    // Control the spindle. Speed is given in rpm, 0 means spindle stop
+                                                    // Stop command will stop the spindle
+                                                    // IN:      [0xAA][0x96][0x02][rrrr rrrr][rrrr rrrr][cksum]
+                                                    // OUT:     [ACK][0x00] - if accepted / operation started
+                                                    //          [PEN] - if another operation is in execution or sequencer is running
+                                                    //          [INV] - invalid parameter
 
 
     // operational commands
@@ -385,7 +391,7 @@
             int32                       scale_spindle;
             struct SCmdType_GetCoord    get_coord;
             uint32                      coord_dump;         // 0 - coordinate dump off, 1 - coordinate dump on, 2 - poll coordinate
-            uint32                      ib_spindle_speed;
+            uint32                      ib_spindle_speed;   // used also for outband spindle speed
             uint32                      ib_wait;
             struct SCmdType_goto        ib_goto;
             struct SCmdType_drill       ib_drill;

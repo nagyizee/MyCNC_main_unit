@@ -70,6 +70,8 @@
         struct SStepCoordinates     z_probe;            // position of the tooltip probe
         uint16                      feed_max;           // maximum allowed feed speed
         uint16                      feed_rapid;         // rapid transition speed used for internal sequences
+        uint16                      spindle_max;        // maximum spindle speed
+        uint16                      spindle_min;        // minimum spindle speed
         int32                       spindle_scale;      // scale the spindle speed up/down +/- 200%
     };
     

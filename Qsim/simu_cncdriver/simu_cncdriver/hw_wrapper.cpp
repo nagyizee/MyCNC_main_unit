@@ -721,6 +721,8 @@ uint32 comm_wrChar( uint8 byte )
  *    - CMD_OBSA_GO_HOME                "home"
  *    - CMD_OBSA_FIND_Z_ZERO            "fzzr"
  *    - CMD_OBSA_STEP                   "step"      <coord list><dir>        coord list can be like "xya", dir is "+--"  ->  [H][C_step][P_xya,+--][S]
+ *    - CMD_OBSA_FREERUN                "frun"      <axis><dir><infinite><feed>
+ *    - CMD_OBSA_SPINDLE                "spin"      <rpm>
  *    - CMD_OBSA_START                  "STRT"
  *    - CMD_OB_PAUSE                    "PAUS"
  *    - CMD_OB_STOP                     "STOP"
@@ -925,6 +927,25 @@ int local_parse_freerun( char *chunk, uint8 *outdata, int *out_ptr )
     outdata[ptr] |= ( token[1][0] == '+' ) ? 0x10 : 0x00;
     outdata[ptr++] |= ( atoi(token[3]) >> 8 ) & 0x0f;
     outdata[ptr++] = atoi(token[3]) & 0xff;
+    *out_ptr = ptr;
+    return 0;
+}
+
+int local_parse_spindle( char *chunk, uint8 *outdata, int *out_ptr )
+{
+    int i;
+    int ptr;
+    char *token;
+
+    ptr = *out_ptr;
+
+    token = strtok( chunk, " ,]" );
+    if ( token == NULL )
+        return -1;
+
+    outdata[ptr++] = (atoi(token) >> 8) & 0xff;
+    outdata[ptr++] = atoi(token) & 0xff;
+
     *out_ptr = ptr;
     return 0;
 }
@@ -1245,6 +1266,8 @@ int mainw::HW_wrp_input_line(QString line)
                     cmd_type = CMD_OBSA_STEP;
                 else if ( strncmp(token+3, "frun", 4 ) == 0 )
                     cmd_type = CMD_OBSA_FREERUN;
+                else if ( strncmp(token+3, "spin", 4 ) == 0 )
+                    cmd_type = CMD_OBSA_SPINDLE;
                 else if ( strncmp(token+3, "STRT", 4 ) == 0 )
                     cmd_type = CMD_OBSA_START;
                 else if ( strncmp(token+3, "PAUS", 4 ) == 0 )
@@ -1315,6 +1338,10 @@ int mainw::HW_wrp_input_line(QString line)
                             break;
                         case CMD_OBSA_FREERUN:                              // [H][C_frun][P_x,+,1,300][S]   or [H][C_frun][P_x,+,0,300][S]
                             if ( local_parse_freerun( token+3, outdata + out_ptr + 1, &p_len ) )
+                                return -1;
+                            break;
+                        case CMD_OBSA_SPINDLE:                              // [H][C_spin][P_12000][S]
+                            if ( local_parse_spindle( token+3, outdata + out_ptr + 1, &p_len ) )
                                 return -1;
                             break;
                         case CMD_OB_SCALE_FEED:                             // [H][C_scfd][P_-150][S]
