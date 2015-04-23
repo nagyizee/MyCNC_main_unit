@@ -230,7 +230,7 @@
                                                     //         - currently executed (or stopped) cmdID 
                                                     //         - command fifo free space
                                                     // IN:      [0xAA][0x33][cksum]
-                                                    // OUT:     [ACK][0x85][  IB  prcc][GSFs gggg][freesp][cmdIDex][cmdIDq][cksum]
+                                                    // OUT:     [ACK][0x85][ eIB  prcc][GSFs gggg][freesp][cmdIDex][cmdIDq][cksum]
                                                     // 
                                                     //              cc -  00 - no outband operation in execution, or last one succeeded
                                                     //                    01 - last outband operation failed
@@ -240,6 +240,7 @@
                                                     // 
                                                     //              B  - button press changed running status -> read the cc, r, p to discover what happened
                                                     //              I  - initial status - marking a fresh reset. cleared when CMD_OBSA_FIND_ORIGIN is executed
+                                                    //              e  - end of run but in started state (inband fifo empty)
                                                     // 
                                                     //              s  - starvation detected
                                                     //              F  - coordinate fault detected (missed steps) - trying to fix it (hopefully - otherwise general failure)

@@ -1349,6 +1349,7 @@ static inline int internal_outband_get_status( void )
 {
     struct ScmdIfResponse resp;
     struct ScmdIfCommand *ibcmd;
+    bool inband_empty = false;
 
     ibcmd = internal_fifo_get_last_introduced();
 
@@ -1357,6 +1358,11 @@ static inline int internal_outband_get_status( void )
     resp.resp.status.cmdIDex = motion_sequence_crt_cmdID();
     resp.resp.status.cmdIDq = (ibcmd != NULL) ? ibcmd->cmdID : 0x00;
     resp.resp.status.freeSpace = internal_fifo_free();
+
+    if ( cnc.status.flags.f.run_program &&
+         (motion_sequence_check_run() == false) &&
+         cnc.status.inband.mc_started )
+        inband_empty = true;
 
     // prepare status byte
     if ( cnc.status.flags.f.run_outband )
@@ -1370,6 +1376,7 @@ static inline int internal_outband_get_status( void )
     resp.resp.status.status_byte |= cnc.status.flags.f.run_paused ? (1 << 3) : 0x00;        // p
     resp.resp.status.status_byte |= cnc.status.flags.f.stat_bpress ? (1 << 4) : 0x00;       // B
     resp.resp.status.status_byte |= cnc.status.flags.f.stat_restarted ? (1 << 5) : 0x00;    // I
+    resp.resp.status.status_byte |= inband_empty ? (1 << 6) : 0x00;                         // e
 
     // prepare failure byte
     resp.resp.status.fail_byte  = cnc.status.flags.f.err_code & 0x0f;

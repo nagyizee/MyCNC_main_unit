@@ -1449,8 +1449,8 @@ int mainw::HW_wrp_simu_datafeed()
         {
             char str[100];
 
-            sprintf(  str, "[..%c%c %c%c%c%c][%c%c%c%c] code:%02d | free:%02d execID:%03d QID:%03d",
-                     (comm_rx.resp[2] & 0x20)?'I':'-', (comm_rx.resp[2] & 0x10)?'B':'-',
+            sprintf(  str, "[.%c%c%c %c%c%c%c][%c%c%c%c] code:%02d | free:%02d execID:%03d QID:%03d",
+                     (comm_rx.resp[2] & 0x40)?'e':'-', (comm_rx.resp[2] & 0x20)?'I':'-', (comm_rx.resp[2] & 0x10)?'B':'-',
                      (comm_rx.resp[2] & 0x08)?'p':'-', (comm_rx.resp[2] & 0x04)?'r':'-', (comm_rx.resp[2] & 0x02)?'1':'0', (comm_rx.resp[2] & 0x01)?'1':'0',
                      (comm_rx.resp[3] & 0x80)?'G':'-', (comm_rx.resp[3] & 0x40)?'S':'-', (comm_rx.resp[3] & 0x20)?'F':'-', (comm_rx.resp[3] & 0x10)?'s':'-',
                      (comm_rx.resp[3] & 0x0f),
