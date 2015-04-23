@@ -150,7 +150,7 @@ struct SMotionCoreISR       isr;
 
 extern void event_ISR_set10ms(void);
 extern void event_ISR_set100us(void);
-
+extern void event_ISR_segment_finished(void);
 
 /* *************************************************
  *
@@ -477,6 +477,7 @@ void StepTimerIntrHandler (void)
                 {
                     isr.state = MCISR_STATUS_IDLE;
                     StepDBG_SegmentFinished();
+                    event_ISR_segment_finished();
     
                     // release element
                     if (isr.stepper_fifo.c)
@@ -645,6 +646,7 @@ int stepper_confirm_inband(void)
         return -1;
     __disable_interrupt();
     // advance to the next element
+    event_ISR_segment_finished();
     isr.stepper_fifo.r++;
     if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
         isr.stepper_fifo.r = 0;
@@ -675,7 +677,17 @@ struct SStepFifoElement *stepper_get_current_in_run(void)
     // use it only for the current isr.request in a single loop. (postponing can overwrite it's content)
     struct SStepFifoElement *elem;
     __disable_interrupt();
-    elem = &isr.stepper_fifo.stp[isr.stepper_fifo.r];
+    if ( isr.stepper_fifo.c )                               // still in run
+        elem = &isr.stepper_fifo.stp[isr.stepper_fifo.r];   // send the current from read pointer
+    else                                                    // if not in run 
+    {
+        int r;
+        if ( isr.stepper_fifo.r )
+            r = isr.stepper_fifo.r - 1;
+        else
+            r = MAX_STEP_FIFO - 1;
+        elem = &isr.stepper_fifo.stp[r];                    // send the previous element since read pointer is incremented uppon sequence finish
+    }
     __enable_interrupt();
     return elem;
 }
@@ -790,7 +802,7 @@ static inline int internal_sequence_fifo_fullness( void )
 
 static struct SStepFifoElement *internal_step_fifo_get_fill_pointer( void )
 {
-    if ( isr.stepper_fifo.c >= MAX_STEP_FIFO )              // atomic op., can be used w/o mutex
+    if ( isr.stepper_fifo.c >= (MAX_STEP_FIFO - 1) )    // atomic op., can be used w/o mutex
         return NULL;
     return &isr.stepper_fifo.stp[ isr.stepper_fifo.w ]; // write pointer is operated by user level - no need for mutex
 }
@@ -798,7 +810,7 @@ static struct SStepFifoElement *internal_step_fifo_get_fill_pointer( void )
 
 static int internal_step_fifo_insert( struct SStepFifoElement *stp )
 {
-    if ( isr.stepper_fifo.c >= MAX_STEP_FIFO )
+    if ( isr.stepper_fifo.c >= (MAX_STEP_FIFO - 1) )    // use MAX_STEP_FIFO - 1 to preserve the last executed position in case of readback in stop
         return -1;
 
     if ( stp != NULL )
@@ -879,6 +891,17 @@ static inline void internal_pwr_check_and_update_status( bool tick )
 /*--------------------------
  *  Sequencer routines
  *-------------------------*/
+
+static bool internal_run_helper_coordinates_differ( struct SStepCoordinates *c1, struct SStepCoordinates *c2 )
+{
+    int i;
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
+    {
+        if ( c1->coord[i] != c2->coord[i] )
+            return true;
+    }
+    return false;
+}
 
 static inline uint32 internal_run_helper_get_distance( TStepCoord val1, TStepCoord val2, uint32 *dist )
 {
@@ -1330,6 +1353,18 @@ static int internal_step_precalculator( void )
             core.status.motion.pcoord_updated = true;
         }
 
+        // check for case when sequence is of length 0
+        if ( internal_run_helper_coordinates_differ( &core.status.motion.pcoord, &crt_seq->params.go_to.coord ) == false )
+        {
+            crt_seq->seqType = SEQ_TYPE_DUMMY;
+            goto _skip;
+        }
+
+        if ( next_seq && (crt_seq->seqType == SEQ_TYPE_GOTO) &&
+            ( internal_run_helper_coordinates_differ( &crt_seq->params.go_to.coord, &next_seq->params.go_to.coord ) == false ))
+            next_seq->seqType = SEQ_TYPE_DUMMY;
+
+        // do the precalculation
         if ( internal_sequence_precalculate( crt_seq, next_seq, pstep ) )
             return -1;
 
@@ -1343,6 +1378,7 @@ static int internal_step_precalculator( void )
         //location for note#0001 from motion_core_internals.h
     }
 
+_skip:
     internal_sequence_fifo_get( NULL );                 // dummy get to advance the read pointer            
     return internal_step_fifo_insert( NULL );
 }
@@ -1399,9 +1435,9 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
                 }
                 break;
             case isrur_execute_inband:
-                if ( core.status.inband_cb == NULL )
+                if ( (core.status.inband_cb == NULL) || (elem->seqType == SEQ_TYPE_DUMMY) )
                 {
-                     // no inband callback defined - unlock immediately
+                     // no inband callback defined or dummy sequence - unlock immediately
                     stepper_confirm_inband();
                 }
                 else
@@ -1580,6 +1616,11 @@ int motion_freerun( uint32 axis, bool dir, uint32 feed, bool no_lim )
     return 0;
 }
 
+
+struct SMotionSequence *motion_sequence_get_fill_pointer( void )
+{
+    return internal_sequence_fifo_get_fill_pointer();
+}
 
 int motion_sequence_insert( struct SMotionSequence *seq )
 {

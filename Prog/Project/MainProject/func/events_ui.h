@@ -27,6 +27,7 @@
 
         uint32  cnc_motion_warn_starving:1; // if motion core is running sequences, input fifo has sequences but output fifo is emptied and IRQ staves
         uint32  cnc_motion_seq_fatal:1;     // fatal error produced in sequence execution (like out of boundaries or impossible speed setup error)
+        uint32  cnc_motion_seq_finished:1;  // ISR finished executing a sequence
 
         uint32  emerg_button:1;             // emergency button pressed - button state
         uint32  button_pressed_emerg:1;     // emergency button pressed - refresh - instant

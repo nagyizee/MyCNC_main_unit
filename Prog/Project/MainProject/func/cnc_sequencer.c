@@ -75,9 +75,11 @@ void internal_fifo_flush(void)
     cnc.cmd_fifo.w = 0;
     cnc.cmd_fifo.r = 0;
     cnc.cmd_fifo.e = 0;
-    cnc.cmd_fifo.wrtb = CNCSEQ_CMD_FIFO_SIZE;
-    cnc.cmd_fifo.rdb = 0;
-}
+    cnc.cmd_fifo.wrtb = CNCSEQ_CMD_FIFO_SIZE;       // free space writeable:  fifosz - (readable + eraseable)
+    cnc.cmd_fifo.rdb = 0;                           // readable data size:    fifosz - (writeable + eraseable)  eraseable means - allready read but in hold
+}                                                   //     eraseable = fifosz - (readable + writeable)  
+
+#define SEQFIFO_ERASEABLE       ( CNCSEQ_CMD_FIFO_SIZE - ( cnc.cmd_fifo.rdb + cnc.cmd_fifo.wrtb ) )
 
 // get a fillable pointer from the write pointer.
 // internal_fifo_push() should be called to advance to the next
@@ -153,7 +155,7 @@ struct ScmdIfCommand *internal_fifo_peek_readable(void)
 
 struct ScmdIfCommand *internal_fifo_peek_eraseable(void)
 {
-    if ( cnc.cmd_fifo.e == cnc.cmd_fifo.r )
+    if ( SEQFIFO_ERASEABLE == 0 )
         return NULL;
     return &cnc.cmd_fifo.cmd[ cnc.cmd_fifo.e ];
 }
@@ -161,8 +163,7 @@ struct ScmdIfCommand *internal_fifo_peek_eraseable(void)
 // erase an element
 int internal_fifo_erase( void )
 {
-    if ( (cnc.cmd_fifo.e == cnc.cmd_fifo.w) ||
-         (cnc.cmd_fifo.e == cnc.cmd_fifo.r) )
+    if ( SEQFIFO_ERASEABLE == 0 )
         return -1;
 
     cnc.cmd_fifo.e++;
@@ -196,7 +197,7 @@ static int internal_procedure_coordinate_check_entry( void )
 
 static int internal_procedure_coordinate_check_poll( struct SEventStruct *evt )
 {
-    if ( cnc.status.procedure.procID == procid_none )
+    if ( cnc.status.procedure.procID != procid_getcoordinates )
         return 0;
 
     if ( (cnc.status.procedure.params.getcoord.coord_snapshot.coord[0] == CNC_COORD_UNINIT ) &&
@@ -593,6 +594,248 @@ static void internal_ob_helper_setstate_failed(void)
 }
 
 
+static void internal_ib_helper_stop_non_restartable( void )
+{
+    internal_stop(false);
+    internal_fifo_flush();
+    cnc.status.flags.f.run_program = 0;
+    cnc.status.flags.f.run_paused = 0;
+}
+
+static void internal_ib_helper_stop_restartable( void )
+{
+
+}
+
+static void internal_ib_helper_start_over( void )
+{
+
+}
+
+static inline void internal_ib_helper_fetch_and_push_cmd( struct SEventStruct *evt )
+{
+    struct SMotionSequence *seq;
+    struct ScmdIfCommand *cmd;
+    bool to_start = false;
+
+    cmd = internal_fifo_peek_readable();            
+    if ( cmd )
+    {
+        switch ( cmd->cmd_type )
+        {
+            // commands which can be pushed right away
+            case CMD_IB_GOTO:
+            case CMD_IB_WAIT:
+            case CMD_IB_SPINDLE:            
+                seq = motion_sequence_get_fill_pointer();
+                if ( seq )
+                {
+                    seq->cmdID = cmd->cmdID;
+                    seq->seqID = 1;                         // seqID for inbands means - sequences straight from program
+                    if ( cmd->cmd_type == CMD_IB_GOTO)
+                    {
+                        seq->seqType = SEQ_TYPE_GOTO;
+                        seq->params.go_to.feed = cmd->cmd.ib_goto.feed;
+                        seq->params.go_to.coord = cmd->cmd.ib_goto.coord;
+                    }
+                    else if ( cmd->cmd_type == CMD_IB_WAIT)
+                    {
+                        seq->seqType = SEQ_TYPE_HOLD;
+                        seq->params.hold = cmd->cmd.ib_wait;
+                    }
+                    else
+                    {
+                        seq->seqType = SEQ_TYPE_SPINDLE;
+                        seq->params.spindle = cmd->cmd.ib_spindle_speed;
+                    }
+                    motion_sequence_insert(NULL);   // push the built sequence in the motion core
+                    internal_fifo_pull();           // pull out the currently processed command
+                }
+                else
+                    to_start = true;                // start when sequence fifo is full
+                break;
+            // commands which can generate more sequences
+            case CMD_IB_DRILL:
+                // TODO
+                break;
+        }
+    }
+    else
+        to_start = true;                            // start when command fifo is empty
+
+    if ( to_start && (cnc.status.inband.mc_started == false))
+    {
+        cnc.status.inband.mc_started = true;
+        cnc.status.inband.check_coord = SEQ_PERIOD_COORD_CHK_OUTBAND;
+        motion_sequence_start();
+    }
+}
+
+static inline void internal_ib_helper_process_callback( struct SEventStruct *evt )
+{
+    if ( cnc.status.inband.cb_operation == SEQ_TYPE_HOLD )      // hold timer
+    {
+        if ( evt->timer_tick_10ms )
+        {
+            cnc.status.inband.cb_op.wait--;
+            if ( cnc.status.inband.cb_op.wait == 0 )
+            {
+                cnc.status.inband.cb_operation = 0;
+                motion_sequence_confirm_inband_execution();
+            }
+        }
+    }
+    else if ( cnc.status.inband.cb_operation == SEQ_TYPE_SPINDLE )  // spindle control
+    {
+        if ( evt->timer_tick_10ms || evt->fe_op_completed )
+        {
+            int res;
+
+            if ( cnc.status.inband.cb_op.spindle.timeout )      // in case if timeout is needed - process it first
+            {
+                cnc.status.inband.cb_op.spindle.timeout--;
+                if ( cnc.status.inband.cb_op.spindle.timeout == 0 )
+                {
+                    internal_procedure_spindle_control_entry( cnc.status.inband.cb_op.spindle.speed );
+                }
+                return;
+            }
+
+            res = internal_procedure_spindle_poll(evt);
+            if ( res == 0 )                                     // spindle procedure not finished
+                return;
+            if ( res == 1 )                                     // procedure finished with success
+            {
+                cnc.status.inband.cb_operation = 0;
+                if ( cnc.status.inband.cb_op.spindle.not_callback )
+                    internal_ib_helper_start_over();
+                else
+                    motion_sequence_confirm_inband_execution();
+                return;
+            }
+            // error handling
+            cnc.status.inband.cb_op.spindle.retry --;
+            if ( (cnc.status.inband.cb_op.spindle.retry == 0) ||    // retried X times, no success
+                 (cnc.status.flags.f.err_fatal) )
+            {
+                if ( cnc.status.flags.f.err_fatal == 0 )
+                    cnc.status.flags.f.err_code = GENFAULT_SPINDLE_STUCK;
+                cnc.status.flags.f.err_fatal = 1;
+
+                internal_ib_helper_stop_non_restartable();
+            }
+            else
+            {
+                cnc.status.inband.cb_op.spindle.timeout = 50;   // 0.5 sec. timeout bw. retrials
+            }
+        }
+    }
+}
+
+static inline void internal_ib_helper_check_operation( struct SEventStruct *evt )
+{
+    // check spindle
+    if ( cnc.status.flags.f.spindle_on && HW_FrontEnd_Event() )     // only spindle jam can be - this is the only active
+    {
+        cnc.status.inband.cb_operation = SEQ_TYPE_SPINDLE;
+        cnc.status.inband.cb_op.spindle.speed = cnc.status.misc.spindle_speed;
+        cnc.status.inband.cb_op.spindle.retry = SEQ_MAX_MOVEMENT_RETRIALS;
+        cnc.status.inband.cb_op.spindle.timeout = 100;
+        cnc.status.inband.cb_op.spindle.not_callback = true;
+        internal_ib_helper_stop_restartable();
+        return;
+    }
+
+    // check for coordinate
+    if ( (evt->timer_tick_100us || evt->fe_op_completed) &&
+          motion_sequence_check_run() )
+    {
+        int res;
+        res = internal_procedure_coordinate_check_poll(evt);
+        if ( res )                                                  // coordinate update completion
+        {
+            if (res == 1)
+            {
+                if ( internal_procedure_coordinate_check_crt_coord( SEQ_MAX_COORDDEV_INBAND, true ) )
+                {
+                    internal_ib_helper_stop_restartable();
+
+                    cnc.status.flags.f.err_step = 1;
+                    cnc.status.inband.coord_fail += 100;     // failure ctr is decreased with 100 at each 10ms. so failure can be accumulated if problem isn't solved
+                    if ( cnc.status.inband.coord_fail > (SEQ_MAX_MOVEMENT_RETRIALS * 100) )
+                    {
+                        // if restart failed X times - halt everything
+                        cnc.status.flags.f.err_code = GENFAULT_TABLE_STUCK;
+                        cnc.status.flags.f.err_fatal = 1;
+                        internal_ib_helper_stop_non_restartable();
+                    }
+                    else
+                    {
+                        // if failed < X times - restart it beginning with the spindle (since it is stopped at the failure detection)
+                        cnc.status.inband.cb_operation = SEQ_TYPE_SPINDLE;
+                        cnc.status.inband.cb_op.spindle.speed = cnc.status.misc.spindle_speed;
+                        cnc.status.inband.cb_op.spindle.retry = SEQ_MAX_MOVEMENT_RETRIALS;
+                        cnc.status.inband.cb_op.spindle.timeout = 100;
+                        cnc.status.inband.cb_op.spindle.not_callback = true;
+                    }
+                }
+                else if ( cnc.status.inband.coord_fail )
+                    cnc.status.inband.coord_fail --;
+            }
+            else
+            {
+                // communication failure with the front-end
+                internal_ib_helper_stop_non_restartable();
+            }
+        }
+        else if ( cnc.status.inband.check_coord )                   // call for coordinate update if is the time
+        {
+            cnc.status.inband.check_coord--;
+            if ( cnc.status.inband.check_coord == 0 )
+            {
+                internal_procedure_coordinate_check_entry();
+                cnc.status.inband.check_coord = SEQ_PERIOD_COORD_CHK_OUTBAND;
+            }
+        }
+    }
+}
+
+static inline void internal_ib_helper_clear_finished_cmd( struct SEventStruct *evt )
+{
+    if ( evt->cnc_motion_seq_finished )
+    {
+        struct ScmdIfCommand *cmd;
+        uint32 cmdID_crt;       // command ID of the currently executed, or finished
+        bool was_the_same = false;
+
+        cmdID_crt = motion_sequence_crt_cmdID();
+        do
+        {
+            cmd = internal_fifo_peek_eraseable();
+            if ( cmd == NULL )
+                break;
+
+            if ( cmd->cmdID != cmdID_crt )                  // if erasable cmd is not the currently executing
+            {
+                if (was_the_same == false)                  // and is not after the current finished one
+                    internal_fifo_erase();                  //      delete it
+                else                                        // if it was after the current finished one
+                    break;                                  //      we are done
+            }
+            else                                            //  if we reached the current command
+            {
+                if ( motion_sequence_check_run() == false ) // and nothing is executed (current cmd is terminated)
+                    internal_fifo_erase();                  //      delete it
+                else                                        // if the current command is still running
+                    break;                                  //      we are done
+                was_the_same = true;
+            }
+        }
+        while ( 1 );
+    }
+}
+
+
 int internal_stop( bool leave_ob )
 {
     // stop motion core
@@ -955,6 +1198,55 @@ static inline int internal_outband_spindle( struct ScmdIfCommand *cmd )
 }
 
 
+static inline int internal_outband_start( void )
+{
+    if ( cnc.status.flags.f.run_outband )
+        return RESP_PEN;
+
+    if ( cnc.status.flags.f.run_program == 0 )      // from stopped mode, no outband is in run
+    {
+        cnc.status.flags.f.run_program = 1;
+        cnc.status.inband.cb_operation = 0;
+        cnc.status.inband.mc_started = false;
+        cnc.status.inband.cmd_on_hold = false;
+        cnc.status.inband.check_coord = 0;
+        cnc.status.inband.coord_fail = 0;
+    }
+    else if ( cnc.status.flags.f.run_paused )       // from paused mode
+    {
+        internal_ib_helper_start_over();
+    }
+
+    // send acknowledge
+    cnc.status.outband.command.cmd_type = CMD_OBSA_START;
+    internal_send_simple_ack( &cnc.status.outband.command );
+    return RESP_ACK;
+}
+
+
+static inline int internal_outband_pause( void )
+{
+    struct ScmdIfResponse resp;
+
+    if ( cnc.status.flags.f.run_outband )
+        return RESP_PEN;
+
+    if ( cnc.status.flags.f.run_program &&      // from stopped mode, no outband is in run
+         (cnc.status.flags.f.run_paused == 0) )
+    {
+        internal_ib_helper_stop_restartable();
+        cnc.status.flags.f.run_paused = 1;
+    }
+
+    // send acknowledge
+    resp.cmd_type = CMD_OB_PAUSE;
+    resp.resp_type = RESP_ACK;
+    resp.resp.cmdID = motion_sequence_crt_cmdID();
+    cmdif_confirm_reception(&resp);
+    return RESP_ACK;
+}
+
+
 static inline int internal_outband_stop( void )
 {
     struct ScmdIfResponse resp;
@@ -969,12 +1261,17 @@ static inline int internal_outband_stop( void )
     else
         resp.resp.stop.cmdIDq = ibElem->cmdID; 
 
-    internal_stop(false);
-    internal_fifo_flush();
+    internal_ib_helper_stop_non_restartable();
     motion_feed_scale( 0 );
-    cnc.status.flags.f.run_program = 0;
-    cnc.status.flags.f.run_paused = 0;
     cnc.status.misc.spindle_speed = 0;
+
+    if ( cnc.status.flags.f.err_fatal &&
+        ((cnc.status.flags.f.err_code == GENFAULT_SPINDLE_STUCK) ||
+         (cnc.status.flags.f.err_code == GENFAULT_TABLE_STUCK))    )
+    {
+        cnc.status.flags.f.err_code = 0;
+        cnc.status.flags.f.err_fatal = 0;
+    }
 
     resp.resp.stop.cmdIDex = motion_sequence_crt_cmdID();
     cmdif_confirm_reception(&resp);
@@ -1396,6 +1693,24 @@ _error_exit:
 }
 
 
+static inline void internal_poll_inband( struct SEventStruct *evt )
+{
+    // entered if run program is set
+
+
+    if ( cnc.status.inband.cmd_on_hold == false )
+        internal_ib_helper_fetch_and_push_cmd( evt );
+
+    if ( cnc.status.inband.cb_operation )
+        internal_ib_helper_process_callback( evt );
+    else
+        internal_ib_helper_check_operation( evt );
+    
+    internal_ib_helper_clear_finished_cmd( evt );
+
+}
+
+
 static int internal_processcmd_inband( struct ScmdIfCommand *cmd, bool bulk )
 {
     int res = -3;
@@ -1534,7 +1849,7 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
             case CMD_OBSA_STEP:                 res = internal_outband_step( cmd ); break;
             case CMD_OBSA_FREERUN:              res = internal_outband_freerun( cmd ); break;
             case CMD_OBSA_SPINDLE:              res = internal_outband_spindle( cmd ); break;
-            case CMD_OBSA_START:
+            case CMD_OBSA_START:                res = internal_outband_start(); break;
             case CMD_OB_PAUSE:
             case CMD_OB_STOP:                   res = internal_outband_stop(); break;
             case CMD_OB_SCALE_FEED:             res = internal_outband_scale_feed( cmd ); break;
@@ -1648,14 +1963,30 @@ static inline void local_poll_sequencer( struct SEventStruct *evt )
             internal_ob_helper_send_coordinates( RESP_DMP );
         }
     }
+
+    if ( cnc.status.flags.f.run_program )
+    {
+        internal_poll_inband( evt );
+    }
 }
 
 
 void seq_callback_process_inband( uint32 seqType, uint32 value )
 {
+    cnc.status.inband.cb_operation = seqType;
+    cnc.status.inband.cb_op.spindle.not_callback = false;
 
-
-
+    if ( seqType == SEQ_TYPE_HOLD )
+    {
+        cnc.status.inband.cb_op.wait = value * 100;     // 10ms units
+    }
+    else if ( seqType == SEQ_TYPE_SPINDLE )
+    {
+        cnc.status.inband.cb_op.spindle.speed = value;
+        cnc.status.inband.cb_op.spindle.retry = SEQ_MAX_MOVEMENT_RETRIALS;
+        cnc.status.inband.cb_op.spindle.timeout = 0;
+        internal_procedure_spindle_control_entry( value );
+    }
 }
 
 /* *************************************************
@@ -1675,6 +2006,8 @@ void sequencer_init( bool restart )
     if ( front_end_init() == 0 )
         cnc.setup.fe_present = true;
     cmdif_init();
+
+    internal_fifo_flush();
 
     // setup defaults
     cnc.setup.max_travel.coord[ COORD_X ] = CNC_DEFAULT_X;

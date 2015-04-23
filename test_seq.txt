@@ -76,7 +76,21 @@
 [H][C_spin][P_0][S]
 
 
-
+#test woring sequence
+[H][C_igoo][P_1,xyf,0,0,600][S]
+[H][C_igoo][P_2,xy,5000,200][S]
+[H][C_isps][P_3,10000][S]
+[H][C_igoo][P_4,x,12000][S]
+[H][C_igoo][P_5,f,400][S]
+[H][C_igoo][P_6,xy,10000,6000][S]
+[H][C_igoo][P_7,xy,5000,3000][S]
+[H][C_igoo][P_8,xy,2000,2000][S]
+[H][C_igoo][P_9,xy,1500,0][S]
+[H][C_igoo][P_10,xy,6000,3000][S]
+[H][C_STRT][S]
+[H][C_iwai][P_11,5][S]
+[H][C_igoo][P_12,xy,5000,4000][S]
+[H][C_igoo][P_13,xz,100,500][S]
 
 
 

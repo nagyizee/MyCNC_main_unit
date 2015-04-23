@@ -11,7 +11,7 @@
     #include "command_if.h"
 
 
-    #define CNCSEQ_CMD_FIFO_SIZE    64      // 28*32 = 1792 bytes
+    #define CNCSEQ_CMD_FIFO_SIZE    10      // 28*32 = 1792 bytes
 
     #define SEQ_FEED_PWR_HIGH       700
     #define SEQ_FEED_PWR_MED        400
@@ -19,10 +19,12 @@
 
     #define SEQ_PERIOD_COORD_CHK_FRUN       100     // 10.0ms
     #define SEQ_PERIOD_COORD_CHK_OUTBAND    100     // 10.0 ms
+    #define SEQ_PERIOD_COORD_CHK_INBAND     20      // 2.0 ms   ( 0.05mm with max speed on 10khz pulse - 1500mm/min )
     #define SEQ_PERIOD_FRUN_SAFESTOP        2000    // 200.0ms
 
     #define SEQ_MAX_COORDDEV_FRUN       5       // maximum 5 steps are allowed as deviation at freerun  
     #define SEQ_MAX_COORDDEV_OUTBAND    2
+    #define SEQ_MAX_COORDDEV_INBAND     2
 
     #define SEQ_MAX_MOVEMENT_RETRIALS   5
 
@@ -117,6 +119,14 @@
         struct SStepCoordinates coord_fe;           // coordinates in motion core when front-end receives the coordinate read command
     };
 
+    struct SInbandOp_SetSpindle
+    {
+        uint16  speed;              // set speed
+        uint8   retry;              // retrial times
+        uint8   timeout;            // timeout bw. retrials
+        bool    not_callback;       // if true then restart needs to be done - not callback confirm
+    };
+
     struct SCommandStatus
     {
         uint8                   last_cmdID;     // last successfully introduced inband cmdID, 0 if no commands were introduced since stop/flush
@@ -168,6 +178,21 @@
         struct SOutbandProbeInfo    probe;
     };
 
+    struct SCNCInband
+    {
+        bool    mc_started;         // if motion core is started - it will be started when input command fifo is empty or motion sequence fifo is full
+        bool    cmd_on_hold;        // set when a command needs to generate more sequences, reset when all the sequences are pushed
+        uint32  cb_operation;       // callback operation executed, see CMD_IB_XXX. - 0 if none.
+        union 
+        {
+            uint32                      wait;       // waiting countdown
+            struct SInbandOp_SetSpindle spindle;    // spindle control
+        }       cb_op;
+
+        uint32  check_coord;
+        uint32  coord_fail;
+    };
+
     struct SCNCProcedure
     {
         enum EProcedureID       procID;         // procedure ID
@@ -190,6 +215,7 @@
         struct SCommandStatus   cmd;            // generic command status
         union SStatusFlags      flags;          // cnc sequencer status flags
         struct SCNCOutband      outband;        // outband command execution status
+        struct SCNCInband       inband;         // inband related status
         struct SCNCProcedure    procedure;      // internal procedure
         struct SCNCMisc         misc;           // spindle setup
     };

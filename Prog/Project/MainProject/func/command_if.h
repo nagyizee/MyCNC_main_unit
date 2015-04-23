@@ -186,9 +186,11 @@
                                                     // - pause is synchronous, ACK will be transmitted at finishing of the operation
                                                     //   use adequated timeout period.
                                                     // IN:      [0xAA][0x22][cksum]
-                                                    // OUT:     [ACK][0x81][cmdID][cksum] - started executing, cmdID of the command currenty interrupted
+                                                    // OUT:     [ACK][0x81][cmdID][cksum] - cmdID of the command currenty interrupted
+                                                    //          [PEN] - if another operation is in execution
 
     #define CMD_OB_STOP                     0x23    // clears up the running state, empty all the fifos, stops the spindle, updates the coordintes from front-end
+                                                    // spindle and table related general faults are reset.
                                                     // - stop is synchronous, ACK will be transmitted at finishing of the operation
                                                     //   use adequated timeout period.
                                                     // IN:      [0xAA][0x23][cksum]
@@ -245,7 +247,8 @@
                                                     //              G  - general failure - must read error code  --- If this is set [gggg] holds the error code
                                                     //                  -- when this happens, sequencer stops and flushes everything
                                                     //                  -- main causes: unrecoverable spindle stuck / missing front-end link / unrecoverable missed step
-                                                    //                  -- NOTE: system must be reset, and checked mechanically and for faulty connections
+                                                    //                  -- NOTE: in case of front-end link error - system must be reset, and checked for faulty connections
+                                                    //                           The other general faults are resettable by STOP command. System must be checked mechanically
 
     #define CMD_OB_GET_PROBE_TOUCH          0x34    // returns the touch point of the probe.
                                                     // IN:      [0xAA][0x34][cksum]
@@ -258,6 +261,9 @@
     // bulk format:
     //      IN:     [0xAA] - [0xC0][cmdTotalLen] - [0xCn][cmdlen][cmdID][cmd params]-[0xCn][cmdlen][cmdID][cmd params] ... [0xCn][cmdlen][cmdID][cmd params] - [cksum]
     //      where [cmdTotalLen] is the size in bytes of data till checksum (not considering it)
+    // 
+    // [cmdID] should be in incremental way between the consecutive sequences, and non 0. CmdID=0 is returned when no command was used
+    // 
 
     #define CMD_IB_BULK                     0x40    // see abowe
 

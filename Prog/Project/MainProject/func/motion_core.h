@@ -12,6 +12,7 @@
     #define SEQ_TYPE_GOTO       1       // linear motion
     #define SEQ_TYPE_SPINDLE    2       // spindle speed
     #define SEQ_TYPE_HOLD       3       // hold time
+    #define SEQ_TYPE_DUMMY      4       // dummy seuence - used mainly for goto with 0 length
 
 
     #define CMD_ID_INVALID         ((uint32)(-1))
@@ -90,8 +91,11 @@
     // Note: axis power needs to be set up by the client layer
     int motion_freerun( uint32 axis, bool dir, uint32 feed, bool no_lim );
 
-    
-   // insert a motion sequence in the sequence fifo
+
+    // get a fill pointer from sequence fifo. returs null if no free space
+    struct SMotionSequence *motion_sequence_get_fill_pointer( void );
+
+    // insert a motion sequence in the sequence fifo
     int motion_sequence_insert( struct SMotionSequence *seq );
 
     // start motion sequence - if queue is empty it will wait for new sequence insertion,
