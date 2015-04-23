@@ -152,6 +152,7 @@ int seq_ctr = 0;
 
 void InitHW(void)
 {
+
 }
 
 
@@ -1428,11 +1429,43 @@ int mainw::HW_wrp_simu_datafeed()
     if ( comm_rx.resp_ct )
     {
         HW_wrp_insert_message( comm_rx.resp, comm_rx.resp_ct, false );
+
+        if ( (commwait_getcoord && (comm_rx.resp[0] == RESP_ACK)) || (comm_rx.resp[0] == RESP_DMP) )
+        {
+            char coord_str[100];
+            struct SStepCoordinates coord;
+
+            coord.coord[COORD_X] = (comm_rx.resp[2] << 12) | (comm_rx.resp[3] << 4) | (comm_rx.resp[4] >> 4);
+            coord.coord[COORD_Y] = ( (comm_rx.resp[4] & 0x0f) << 16) | (comm_rx.resp[5]<<8) | (comm_rx.resp[6]);
+            coord.coord[COORD_Z] = (comm_rx.resp[7] << 12) | (comm_rx.resp[8] << 4) | (comm_rx.resp[9] >> 4);
+            coord.coord[COORD_A] = ( (comm_rx.resp[9] & 0x0f) << 16) | (comm_rx.resp[10]<<8) | (comm_rx.resp[11]);
+
+            sprintf( coord_str, "X:%05i Y:%05i Z:%05i A:%05i | execID:%03d QID:%03d",
+                     coord.coord[0], coord.coord[1], coord.coord[2], coord.coord[3], comm_rx.resp[12], comm_rx.resp[13]);
+            ui->ln_coordinates->setText( QString(coord_str) );
+            commwait_getcoord = false;
+        }
+        if ( commwait_getstatus && (comm_rx.resp[0] == RESP_ACK) )
+        {
+            char str[100];
+
+            sprintf(  str, "[..%c%c %c%c%c%c][%c%c%c%c] code:%02d | free:%02d execID:%03d QID:%03d",
+                     (comm_rx.resp[2] & 0x20)?'I':'-', (comm_rx.resp[2] & 0x10)?'B':'-',
+                     (comm_rx.resp[2] & 0x08)?'p':'-', (comm_rx.resp[2] & 0x04)?'r':'-', (comm_rx.resp[2] & 0x02)?'1':'0', (comm_rx.resp[2] & 0x01)?'1':'0',
+                     (comm_rx.resp[3] & 0x80)?'G':'-', (comm_rx.resp[3] & 0x40)?'S':'-', (comm_rx.resp[3] & 0x20)?'F':'-', (comm_rx.resp[3] & 0x10)?'s':'-',
+                     (comm_rx.resp[3] & 0x0f),
+                    comm_rx.resp[4], comm_rx.resp[5], comm_rx.resp[6] );
+
+            ui->ln_status->setText( QString(str) );
+            commwait_getstatus = false;
+        }
+
         comm_rx.resp_ct = 0;
     }
 
     return 0;
 }
+
 
 
 

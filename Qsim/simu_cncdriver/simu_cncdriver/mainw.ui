@@ -36,7 +36,7 @@
    <widget class="QGroupBox" name="groupBox">
     <property name="geometry">
      <rect>
-      <x>1060</x>
+      <x>1230</x>
       <y>610</y>
       <width>241</width>
       <height>111</height>
@@ -136,7 +136,7 @@
    <widget class="QPushButton" name="pb_cmd_feed_line">
     <property name="geometry">
      <rect>
-      <x>680</x>
+      <x>510</x>
       <y>600</y>
       <width>75</width>
       <height>23</height>
@@ -813,9 +813,9 @@
    <widget class="QGroupBox" name="groupBox_4">
     <property name="geometry">
      <rect>
-      <x>910</x>
+      <x>600</x>
       <y>600</y>
-      <width>141</width>
+      <width>531</width>
       <height>121</height>
      </rect>
     </property>
@@ -825,8 +825,8 @@
     <widget class="QPushButton" name="pb_start">
      <property name="geometry">
       <rect>
-       <x>50</x>
-       <y>10</y>
+       <x>10</x>
+       <y>20</y>
        <width>75</width>
        <height>23</height>
       </rect>
@@ -835,24 +835,11 @@
       <string>Start</string>
      </property>
     </widget>
-    <widget class="QPushButton" name="pb_feedSeq">
-     <property name="geometry">
-      <rect>
-       <x>50</x>
-       <y>30</y>
-       <width>75</width>
-       <height>23</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>FeedSeq</string>
-     </property>
-    </widget>
     <widget class="QPushButton" name="pb_stop">
      <property name="geometry">
       <rect>
-       <x>50</x>
-       <y>60</y>
+       <x>10</x>
+       <y>80</y>
        <width>75</width>
        <height>23</height>
       </rect>
@@ -861,36 +848,73 @@
       <string>Stop</string>
      </property>
     </widget>
-    <widget class="QSpinBox" name="nm_scale">
+    <widget class="QPushButton" name="pb_get_status">
      <property name="geometry">
       <rect>
-       <x>70</x>
-       <y>90</y>
-       <width>51</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="buttonSymbols">
-      <enum>QAbstractSpinBox::NoButtons</enum>
-     </property>
-     <property name="minimum">
-      <number>-200</number>
-     </property>
-     <property name="maximum">
-      <number>200</number>
-     </property>
-    </widget>
-    <widget class="QLabel" name="label_9">
-     <property name="geometry">
-      <rect>
-       <x>40</x>
-       <y>95</y>
-       <width>46</width>
-       <height>10</height>
+       <x>100</x>
+       <y>20</y>
+       <width>75</width>
+       <height>23</height>
       </rect>
      </property>
      <property name="text">
-      <string>Scale:</string>
+      <string>Get Status</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="ln_status">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>21</y>
+       <width>341</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <family>Consolas</family>
+      </font>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pb_pause_2">
+     <property name="geometry">
+      <rect>
+       <x>10</x>
+       <y>50</y>
+       <width>75</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Pause</string>
+     </property>
+    </widget>
+    <widget class="QPushButton" name="pb_get_coord">
+     <property name="geometry">
+      <rect>
+       <x>100</x>
+       <y>50</y>
+       <width>75</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Get Coord</string>
+     </property>
+    </widget>
+    <widget class="QLineEdit" name="ln_coordinates">
+     <property name="geometry">
+      <rect>
+       <x>180</x>
+       <y>51</y>
+       <width>341</width>
+       <height>20</height>
+      </rect>
+     </property>
+     <property name="font">
+      <font>
+       <family>Consolas</family>
+      </font>
      </property>
     </widget>
    </widget>
@@ -1093,8 +1117,8 @@
    <widget class="QPushButton" name="pb_cmd_restart">
     <property name="geometry">
      <rect>
-      <x>760</x>
-      <y>600</y>
+      <x>510</x>
+      <y>630</y>
       <width>75</width>
       <height>23</height>
      </rect>
@@ -1108,7 +1132,7 @@
      <rect>
       <x>2</x>
       <y>595</y>
-      <width>670</width>
+      <width>501</width>
       <height>133</height>
      </rect>
     </property>

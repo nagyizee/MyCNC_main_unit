@@ -23,7 +23,8 @@ mainw::mainw(QWidget *parent) :
 
     memset( buttons, 0, sizeof(bool)*3 );
     memset( &cmd_list, 0, sizeof(cmd_list) );
-
+    commwait_getstatus = false;
+    commwait_getcoord = false;
 
     // setup text boxes
     QTextOption text_opt;
@@ -257,24 +258,33 @@ void mainw::on_vs_simu_speed_valueChanged(int value)
 
 void mainw::on_pb_start_clicked()
 {
-    HW_wrp_motion_start();
-}
-
-void mainw::on_pb_feedSeq_clicked()
-{
-    HW_wrp_feed_seq();
+    HW_wrp_input_line( tr("[H][C_STRT][S]") );
 }
 
 
 void mainw::on_pb_stop_clicked()
 {
-    HW_wrp_stop();
+    HW_wrp_input_line( tr("[H][C_STOP][S]") );
 }
 
-void mainw::on_nm_scale_editingFinished()
+void mainw::on_pb_pause_clicked()
 {
-    HW_wrp_set_speedFactor( ui->nm_scale->value() );
+    HW_wrp_input_line( tr("[H][C_PAUS][S]") );
 }
+
+void mainw::on_pb_get_coord_clicked()
+{
+    HW_wrp_input_line( tr("[H][C_gcrd][S]") );
+    commwait_getcoord = true;
+}
+
+void mainw::on_pb_get_status_clicked()
+{
+    HW_wrp_input_line( tr("[H][C_gsts][S]") );
+    commwait_getstatus = true;
+}
+
+
 
 void mainw::on_pb_fe_spindle_jam_clicked()
 {
@@ -325,3 +335,6 @@ void mainw::on_pb_cmd_restart_clicked()
     format.setForeground( Qt::black );
     tc.setCharFormat( format );
 }
+
+
+

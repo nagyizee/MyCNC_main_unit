@@ -1850,7 +1850,7 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
             case CMD_OBSA_FREERUN:              res = internal_outband_freerun( cmd ); break;
             case CMD_OBSA_SPINDLE:              res = internal_outband_spindle( cmd ); break;
             case CMD_OBSA_START:                res = internal_outband_start(); break;
-            case CMD_OB_PAUSE:
+            case CMD_OB_PAUSE:                  res = internal_outband_pause(); break;
             case CMD_OB_STOP:                   res = internal_outband_stop(); break;
             case CMD_OB_SCALE_FEED:             res = internal_outband_scale_feed( cmd ); break;
             case CMD_OB_SCALE_SPINDLE:          res = internal_outband_scale_spindle( cmd ); break;

@@ -63,10 +63,6 @@ private slots:
 
     void on_pb_start_clicked();
 
-    void on_pb_feedSeq_clicked();
-
-    void on_nm_scale_editingFinished();
-
     void on_pb_stop_clicked();
 
     void on_pb_fe_spindle_jam_clicked();
@@ -74,6 +70,12 @@ private slots:
     void on_pb_cmd_feed_line_clicked();
 
     void on_pb_cmd_restart_clicked();
+
+    void on_pb_pause_clicked();
+
+    void on_pb_get_coord_clicked();
+
+    void on_pb_get_status_clicked();
 
 private:
     Ui::mainw *ui;
@@ -117,6 +119,9 @@ public:
 
 
 private:
+    bool commwait_getstatus;
+    bool commwait_getcoord;
+
     void Application_MainLoop( bool tick );
 
     void HW_wrapper_setup( int interval );            // set up the this pointer in the hardware wrapper (simulation module)
