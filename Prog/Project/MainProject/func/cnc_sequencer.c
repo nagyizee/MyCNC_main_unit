@@ -1813,7 +1813,7 @@ static int internal_processcmd_inband( struct ScmdIfCommand *cmd, bool bulk )
         resp.cmd_type = pcmd->cmd_type;
         resp.resp_type = RESP_ACK;
         resp.resp.inband.cmdID = pcmd->cmdID;
-        resp.resp.inband.Qfree = internal_fifo_usable();
+        resp.resp.inband.Qfree = internal_fifo_free();
     }
 
     if ( bulk == false )
