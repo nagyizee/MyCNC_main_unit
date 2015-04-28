@@ -594,8 +594,42 @@ static void internal_ob_helper_setstate_failed(void)
 }
 
 
+static inline void internal_ib_helper_clear_finished_cmd( bool leave_last )
+{
+    struct ScmdIfCommand *cmd;
+    uint32 cmdID_crt;       // command ID of the currently executed, or finished
+    bool was_the_same = false;
+
+    cmdID_crt = motion_sequence_crt_cmdID();
+    do
+    {
+        cmd = internal_fifo_peek_eraseable();
+        if ( cmd == NULL )
+            break;
+
+        if ( cmd->cmdID != cmdID_crt )                  // if erasable cmd is not the currently executing
+        {
+            if (was_the_same == false)                  // and is not after the current finished one
+                internal_fifo_erase();                  //      delete it
+            else                                        // if it was after the current finished one
+                break;                                  //      we are done
+        }
+        else                                            //  if we reached the current command
+        {
+            if ( (motion_sequence_check_run() == false) &&  // and nothing is executed (current cmd is terminated)
+                 (leave_last == false) )
+                internal_fifo_erase();                  //      delete it
+            else                                        // if the current command is still running
+                break;                                  //      we are done
+            was_the_same = true;
+        }
+    }
+    while ( 1 );
+}
+
 static void internal_ib_helper_stop_non_restartable( void )
 {
+    // stop mc and flush sequence fifo, flush the command fifo, terminate started mode
     internal_stop(false);
     internal_fifo_flush();
     cnc.status.flags.f.run_program = 0;
@@ -604,6 +638,18 @@ static void internal_ib_helper_stop_non_restartable( void )
 
 static void internal_ib_helper_stop_restartable( void )
 {
+    // stop mc and flush sequence fifo, command fifo remains, 
+    // - if the interrupted command was a goto: need to save the start and end points of it
+    // - if it was a drill cmd. save the last sequence's start and end point, and memorize which sequence it was, and what needs to be regenerated
+    // - for others, just re-execute the interrupted command
+    struct SStepCoordinates soft_coord;
+
+    motion_sequence_stop();                         // hold still any movements
+    motion_get_crt_coord(&soft_coord);              // get the currently known step coordinates (for reference)
+
+    internal_stop(false);                           // stop everything including the spindle, update the crt. coordinates from front-end
+
+    internal_ib_helper_clear_finished_cmd( true );  // clean up any finished remaining commands - leaving the current one
 
 }
 
@@ -800,40 +846,6 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
     }
 }
 
-static inline void internal_ib_helper_clear_finished_cmd( struct SEventStruct *evt )
-{
-    if ( evt->cnc_motion_seq_finished )
-    {
-        struct ScmdIfCommand *cmd;
-        uint32 cmdID_crt;       // command ID of the currently executed, or finished
-        bool was_the_same = false;
-
-        cmdID_crt = motion_sequence_crt_cmdID();
-        do
-        {
-            cmd = internal_fifo_peek_eraseable();
-            if ( cmd == NULL )
-                break;
-
-            if ( cmd->cmdID != cmdID_crt )                  // if erasable cmd is not the currently executing
-            {
-                if (was_the_same == false)                  // and is not after the current finished one
-                    internal_fifo_erase();                  //      delete it
-                else                                        // if it was after the current finished one
-                    break;                                  //      we are done
-            }
-            else                                            //  if we reached the current command
-            {
-                if ( motion_sequence_check_run() == false ) // and nothing is executed (current cmd is terminated)
-                    internal_fifo_erase();                  //      delete it
-                else                                        // if the current command is still running
-                    break;                                  //      we are done
-                was_the_same = true;
-            }
-        }
-        while ( 1 );
-    }
-}
 
 
 int internal_stop( bool leave_ob )
@@ -1361,6 +1373,7 @@ static inline int internal_outband_get_status( void )
 
     if ( cnc.status.flags.f.run_program &&
          (motion_sequence_check_run() == false) &&
+         (internal_fifo_usable() == 0) &&
          cnc.status.inband.mc_started )
         inband_empty = true;
 
@@ -1712,8 +1725,9 @@ static inline void internal_poll_inband( struct SEventStruct *evt )
         internal_ib_helper_process_callback( evt );
     else
         internal_ib_helper_check_operation( evt );
-    
-    internal_ib_helper_clear_finished_cmd( evt );
+
+    if ( evt->cnc_motion_seq_finished )
+        internal_ib_helper_clear_finished_cmd( false );
 
 }
 

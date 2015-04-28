@@ -21,12 +21,16 @@ static void internal_command_flush( void )
 
 static void internal_add_cksum( uint8 byte )
 {
-    comm.cksum += byte;     // TBD
+//    comm.cksum += byte;     // TBD
+    comm.cksum = (comm.cksum >> 1) + ((comm.cksum & 1) << 7);
+    comm.cksum += byte;
 }
 
 static void internal_add_out_cksum( uint8 *cksum, uint8 byte )
 {
-    *cksum += byte;     // TBD
+//    *cksum += byte;     // TBD
+    (*cksum) = ( (*cksum) >> 1) + (((*cksum) & 1) << 7);
+    (*cksum) += byte;
 }
 
 

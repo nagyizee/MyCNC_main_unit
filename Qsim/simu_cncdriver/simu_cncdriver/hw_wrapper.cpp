@@ -1391,6 +1391,7 @@ int mainw::HW_wrp_input_line(QString line)
                     cksum = (uint8)(COMMCKSUMSTART);
                     for (i=0; i<out_ptr; i++)
                     {
+                        cksum = (cksum >> 1) + ((cksum & 1) << 7);
                         cksum += outdata[i];
                     }
                     outdata[out_ptr++] = cksum;

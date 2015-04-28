@@ -77,8 +77,8 @@
 
 
 #test woring sequence 1
-[H][C_igoo][P_1,xyf,0,0,600][S]
-[H][C_igoo][P_2,xy,5000,200][S]
+[H][C_igoo][P_1,xyf,0,0,1200][S]
+[H][C_igoo][P_2,xyf,5000,200,600][S]
 [H][C_isps][P_3,10000][S]
 [H][C_igoo][P_4,x,12000][S]
 [H][C_igoo][P_5,f,400][S]
