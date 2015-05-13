@@ -41,10 +41,16 @@
  */
 
 
+#define IB_SEQID_SPINDLE        0x80
+#define IB_SEQID_GOBACK_XY      0x81        // don't change the value relation --v
+#define IB_SEQID_GOBACK_Z       0x82        // don't change the value relation --^
+#define IB_SEQID_REALIGN        0x83
+
+
 struct SCNCSequencerInternals   cnc;
 
 
-int internal_stop( bool leave_ob );
+int internal_stop( bool leave_ob, bool stop_spindle );
 
 static void internal_helper_set_power( int axis, uint32 feed )
 {
@@ -77,7 +83,7 @@ void internal_fifo_flush(void)
     cnc.cmd_fifo.e = 0;
     cnc.cmd_fifo.wrtb = CNCSEQ_CMD_FIFO_SIZE;       // free space writeable:  fifosz - (readable + eraseable)
     cnc.cmd_fifo.rdb = 0;                           // readable data size:    fifosz - (writeable + eraseable)  eraseable means - allready read but in hold
-}                                                   //     eraseable = fifosz - (readable + writeable)  
+}                                                   //     eraseable = fifosz - (readable + writeable)
 
 #define SEQFIFO_ERASEABLE       ( CNCSEQ_CMD_FIFO_SIZE - ( cnc.cmd_fifo.rdb + cnc.cmd_fifo.wrtb ) )
 
@@ -121,13 +127,13 @@ int internal_fifo_push( struct ScmdIfCommand *cmd )
 }
 
 // get the nr of elements available for pulling from the fifo
-int internal_fifo_usable(void)
+int internal_fifo_info_usable(void)
 {
     return cnc.cmd_fifo.rdb;
 }
 
 // get the free space in the fifo
-int internal_fifo_free(void)
+int internal_fifo_info_free(void)
 {
     return cnc.cmd_fifo.wrtb;
 }
@@ -172,6 +178,11 @@ int internal_fifo_erase( void )
     return 0;
 }
 
+void internal_fifo_move_read_to_eraser(void)
+{
+    cnc.cmd_fifo.r = cnc.cmd_fifo.e;
+    cnc.cmd_fifo.rdb += SEQFIFO_ERASEABLE;
+}
 
 
 
@@ -309,7 +320,7 @@ static int internal_procedure_spindle_poll( struct SEventStruct *evt )
                     else
                     {
                         cnc.status.procedure.procID = procid_none;      // else return success
-                        return 1; 
+                        return 1;
                     }
                     break;
                 case procid_spindle_pwrup:
@@ -321,8 +332,10 @@ static int internal_procedure_spindle_poll( struct SEventStruct *evt )
                     else                                                // else the completion was for spindle speed command
                     {
                         cnc.status.procedure.procID = procid_none;      // return success
-                        return 1; 
+                        return 1;
                     }
+                    break;
+                default:
                     break;
             }
         }
@@ -515,7 +528,7 @@ static int internal_ob_helper_check_skipped_step( struct SEventStruct *evt, uint
                 }
                 // stop everything - but maintain procedure status
                 // this will updagte the coordinates also
-                internal_stop( true );
+                internal_stop( true, false );
 
                 if ( outband == CMD_OBSA_GO_HOME )
                 {
@@ -594,15 +607,136 @@ static void internal_ob_helper_setstate_failed(void)
 }
 
 
+static void ihp_fillvector( struct SStepCoordinates *coord, double *p )
+{
+    p[0] = coord->coord[0];
+    p[1] = coord->coord[1];
+    p[2] = coord->coord[2];
+}
+
+static void iph_conv_back( double *a, struct SStepCoordinates *coord )
+{
+    int i;
+    for (i=0; i<3; i++)
+    {
+        if ( a[i] < 0 )
+            coord->coord[i] = 0;
+        else if ( (TStepCoord)(a[i]) > cnc.setup.max_travel.coord[i] )
+            coord->coord[i] = cnc.setup.max_travel.coord[i];
+        else
+            coord->coord[i] = (TStepCoord)(a[i]);
+    }
+}
+
+static void iph_substract( double *a, double *b, double *res )
+{
+    res[0] = a[0] - b[0];
+    res[1] = a[1] - b[1];
+    res[2] = a[2] - b[2];
+}
+
+static void iph_multiply_dot( double *a, double *b, double *res )
+{
+    *res = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+static void iph_lenght_squared( double *a, double *res )
+{
+    *res = a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+}
+
+static void iph_multiply( double *a, double scalar, double *res )
+{
+    res[0] = a[0] * scalar;
+    res[1] = a[1] * scalar;
+    res[2] = a[2] * scalar;
+}
+
+
+static void internal_helper_perpendicular( struct SStepCoordinates *crt_coord, struct SStepCoordinates *pi1, struct SStepCoordinates *pi2, struct SStepCoordinates *perp_coord )
+{
+/*  - from stackoverflow http://stackoverflow.com/questions/9368436/3d-perpendicular-point-on-line-from-3d-point
+
+    Parametric equations:
+    x = x1 + t(x2-x1), y = y1 + t(y2-y1), z = z1 + t(z2-z1)
+    The vector u is defined by the coefficients of t. <x2-x1, y2-y1, z2-z1>.
+
+    The vector PQ is defined by Q=crt_coord minus a point P=perp_coord on the line. Any point on the line can be chosen,
+    so it would be simplest to just use the line t = 0, which simplifies to x1, y1, and z1. <xc-x1, yc-y1, zc-z1>
+
+    For the point of intersection the formula to find the actual point is a bit different.
+    To do that, you need to find the component of u in the direction of PQ:
+
+    ((PQ . u) / ||u||^2) * u
+
+    This gets us the w1 component, but we want w2, which is the component between Q and the line:
+
+    PQ = w1 + w2   ->    w2 = PQ - w1
+    From there, we take w2 and add it to the point Q to get the point on the line nearest Q. In code this would be:
+
+    Vector3 p1 = new Vector3(x1, y1, z1);
+    Vector3 p2 = new Vector3(x2, y2, z2);
+    Vector3 q = new Vector3(xc, yc, zc);
+
+    Vector3 u = p2 - p1;
+    Vector3 pq = q - p1;
+    Vector3 w2 = pq - Vector3.Multiply(u, Vector3.Dot(pq, u) / u.LengthSquared);
+
+    Vector3 point = q - w2;    ---->  Where point.X is xp, point.Y is yp, and point.Z is zp
+
+    We will work with double precision since this operation is not time critical
+*/
+    double p1[3];
+    double p2[3];
+    double q[3];
+    double u[3];
+    double pq[3];
+    double dot;
+    double usq;
+
+    ihp_fillvector( pi1, p1 );          // Vector3 p1 = new Vector3(x1, y1, z1);
+    ihp_fillvector( pi2, p2 );          // Vector3 p2 = new Vector3(x2, y2, z2);
+    ihp_fillvector( crt_coord, q );     // Vector3 q = new Vector3(xc, yc, zc);
+
+    iph_substract( p2, p1, u );         // Vector3 u = p2 - p1;
+    iph_substract( q, p1, pq );         // Vector3 pq = q - p1;
+
+    // Vector3 w2 = pq - Vector3.Multiply(u, Vector3.Dot(pq, u) / u.LengthSquared);
+    // p1, p2 are reusable                                                           ((PQ . u) / ||u||^2) * u
+    iph_multiply_dot( pq, u, &dot );            // Vector3.Dot(pq, u)
+    iph_lenght_squared( u, &usq );              // u.LengthSquared
+    if ( usq == 0 )
+    {
+        *perp_coord = *pi2;                     // for the case when the line to be approached is with 0 length -> use the p2 as goto coordinate
+        return;
+    }
+    iph_multiply( u, dot / usq, p1 );           // Vector3.Multiply(u, Vector3.Dot(pq, u) / u.LengthSquared)
+    iph_substract( pq, p1, p2 );                // Vector3 w2 = pq - multiply from abowe;
+
+    iph_substract( q, p2, p1 );                 // Vector3 point = q - w2
+
+    iph_conv_back( p1, perp_coord );            // output the result
+}
+
+
 static inline void internal_ib_helper_clear_finished_cmd( bool leave_last )
 {
     struct ScmdIfCommand *cmd;
     uint32 cmdID_crt;       // command ID of the currently executed, or finished
     bool was_the_same = false;
+    bool do_erase;
 
     cmdID_crt = motion_sequence_crt_cmdID();
+    if ( cmdID_crt == 0 )                               // internal sequence is in run (resuming operation)
+    {                                                   // no command from the fifo should be touched
+        return;
+    }
+    else if (leave_last == false)                       // sequence from a command is in run
+        cnc.status.inband.restartable = false;          // - clean the restartable flag - meaning that we are finished with the restarting (if applicable)
+
     do
     {
+        do_erase = false;
         cmd = internal_fifo_peek_eraseable();
         if ( cmd == NULL )
             break;
@@ -610,7 +744,7 @@ static inline void internal_ib_helper_clear_finished_cmd( bool leave_last )
         if ( cmd->cmdID != cmdID_crt )                  // if erasable cmd is not the currently executing
         {
             if (was_the_same == false)                  // and is not after the current finished one
-                internal_fifo_erase();                  //      delete it
+                do_erase = true;                        //      delete it
             else                                        // if it was after the current finished one
                 break;                                  //      we are done
         }
@@ -618,53 +752,34 @@ static inline void internal_ib_helper_clear_finished_cmd( bool leave_last )
         {
             if ( (motion_sequence_check_run() == false) &&  // and nothing is executed (current cmd is terminated)
                  (leave_last == false) )
-                internal_fifo_erase();                  //      delete it
+                do_erase = true;                        //      delete it
             else                                        // if the current command is still running
                 break;                                  //      we are done
             was_the_same = true;
         }
+
+        if ( do_erase )                                 // erase the command from cmd fifo
+        {
+            if ( cmd->cmd_type == CMD_IB_GOTO )         // but if movement command - save it's destination coordinate as start coordinate of the new command
+                cnc.status.inband.resume.last_erased_coord = cmd->cmd.ib_goto.coord;
+            internal_fifo_erase();
+        }
+
     }
     while ( 1 );
 }
 
-static void internal_ib_helper_stop_non_restartable( void )
-{
-    // stop mc and flush sequence fifo, flush the command fifo, terminate started mode
-    internal_stop(false);
-    internal_fifo_flush();
-    cnc.status.flags.f.run_program = 0;
-    cnc.status.flags.f.run_paused = 0;
-}
 
-static void internal_ib_helper_stop_restartable( void )
-{
-    // stop mc and flush sequence fifo, command fifo remains, 
-    // - if the interrupted command was a goto: need to save the start and end points of it
-    // - if it was a drill cmd. save the last sequence's start and end point, and memorize which sequence it was, and what needs to be regenerated
-    // - for others, just re-execute the interrupted command
-    struct SStepCoordinates soft_coord;
-
-    motion_sequence_stop();                         // hold still any movements
-    motion_get_crt_coord(&soft_coord);              // get the currently known step coordinates (for reference)
-
-    internal_stop(false);                           // stop everything including the spindle, update the crt. coordinates from front-end
-
-    internal_ib_helper_clear_finished_cmd( true );  // clean up any finished remaining commands - leaving the current one
-
-}
-
-static void internal_ib_helper_start_over( void )
-{
-
-}
-
-static inline void internal_ib_helper_fetch_and_push_cmd( struct SEventStruct *evt )
+static inline void internal_ib_helper_fetch_and_push_cmd( void )
 {
     struct SMotionSequence *seq;
     struct ScmdIfCommand *cmd;
     bool to_start = false;
 
-    cmd = internal_fifo_peek_readable();            
+    if ( cnc.status.flags.f.run_paused )
+        return;
+
+    cmd = internal_fifo_peek_readable();
     if ( cmd )
     {
         switch ( cmd->cmd_type )
@@ -672,7 +787,7 @@ static inline void internal_ib_helper_fetch_and_push_cmd( struct SEventStruct *e
             // commands which can be pushed right away
             case CMD_IB_GOTO:
             case CMD_IB_WAIT:
-            case CMD_IB_SPINDLE:            
+            case CMD_IB_SPINDLE:
                 seq = motion_sequence_get_fill_pointer();
                 if ( seq )
                 {
@@ -717,6 +832,136 @@ static inline void internal_ib_helper_fetch_and_push_cmd( struct SEventStruct *e
     }
 }
 
+
+static void internal_ib_helper_stop_non_restartable( void )
+{
+    // stop mc, stop spindle, flush sequence fifo, flush the command fifo, terminate started mode
+    internal_stop(false, true);
+    internal_fifo_flush();
+
+    cnc.status.cmd.last_cmdID = 0;
+    motion_get_crt_coord( &cnc.status.cmd.last_coord );
+
+    cnc.status.flags.f.run_program = 0;
+    cnc.status.flags.f.run_paused = 0;
+    cnc.status.inband.restartable = false;
+}
+
+static void internal_ib_helper_stop_restartable( bool stop_spindle )
+{
+    // stop motion core and flush sequence fifo, command fifo remains,
+    // - if the interrupted command was a goto: need to save the start and end points of it
+    // - if it was a drill cmd. save the last sequence's start and end point, and memorize which sequence it was, and what needs to be regenerated
+    // - for others, just re-execute the interrupted command
+    motion_sequence_stop();                                                 // hold still any movements
+    motion_get_crt_coord(&cnc.status.inband.resume.stopped_soft_coord);     // get the currently known step coordinates (for reference)
+    cnc.status.inband.mc_started = false;
+    cnc.status.inband.check_coord = 0;
+    cnc.status.inband.restartable = true;
+
+    cnc.status.flags.f.run_program = 1;
+    cnc.status.flags.f.run_paused = 1;
+
+    internal_stop(false, stop_spindle);             // stop everything including the spindle, update the crt. coordinates from front-end
+
+    motion_get_crt_coord( &cnc.status.inband.resume.stopped_hard_coord );   // motion core coordinates are updated at internal_stop() from the front_end if
+                                                                            // difference is > +/-1 step
+
+    internal_ib_helper_clear_finished_cmd( true );  // clean up any finished remaining commands in the inband command fifo - leaving the current one
+                                                    // this will update the end coordinate of the deleted cmd (start coordinate of the current one)
+
+    internal_fifo_move_read_to_eraser();            // move read pointer to the eraser - reactivating the unfinished commands
+
+}
+
+static void internal_ib_helper_resume( void )
+{
+    // start the run again.
+    // - if spindle was stopped, but speed is set up --> insert spindle_on sequence
+    // -> if go_home, find_z, freerun, or any movement outband was used --> insert sequences to the leaved point first on XY, then on Z  (possible only after pause command)
+    // -> if coordinate mismatch detected then --> insert sequence which is 3D perpendicular to the leaved point from the current coordinate  (possible on table stuck or spindle stuck event)
+    // - push the interrupted or the next command (internal_ib_helper_fetch_and_push_cmd)
+
+    struct SMotionSequence *seq;
+    struct ScmdIfCommand *cmd;
+    struct SStepCoordinates crt_coord;
+
+    if ( cnc.status.inband.restartable == false )   // if no restartable stop was given - do nothing
+        return;
+                                                    // we will clear this flag only when restarting is finished and sequencer executes actual commands from fifo
+    cnc.status.flags.f.run_paused = 0;              // clear the pause flag to prevent start entering here
+
+    // check for spindle start
+    if ( (cnc.status.flags.f.spindle_on == 0) && (cnc.status.misc.spindle_speed != 0) )
+    {
+        // spindle should be started
+        seq = motion_sequence_get_fill_pointer();
+        seq->cmdID = 0;                             // no command ID with this
+        seq->seqID = IB_SEQID_SPINDLE;              // internal sequence ID for spindle start
+
+        seq->seqType = SEQ_TYPE_SPINDLE;
+        seq->params.spindle = cnc.status.misc.spindle_speed;
+        motion_sequence_insert(NULL);   // push the built sequence in the motion core
+    }
+
+    // check if movement outbands were executed
+    motion_get_crt_coord( &crt_coord );
+    if ( mutil_coordinates_differ( &crt_coord, &cnc.status.inband.resume.stopped_hard_coord ) )     // coordinates differ from last physical - need to go in XY then Z scheme
+    {
+        int i;
+        for ( i=0; i<2; i++ )
+        {
+            seq = motion_sequence_get_fill_pointer();
+            seq->cmdID = 0;                             // no command ID with this
+            seq->seqID = IB_SEQID_GOBACK_XY + i;            // internal sequence ID for XY go-back
+
+            seq->seqType = SEQ_TYPE_GOTO;
+            seq->params.go_to.coord = cnc.status.inband.resume.stopped_hard_coord;
+            if ( i == 0 )
+            {
+                seq->params.go_to.feed = cnc.setup.feed_rapid;
+                seq->params.go_to.coord.coord[ COORD_Z ] = crt_coord.coord[ COORD_Z ];
+            }
+            else
+                seq->params.go_to.feed = cnc.setup.feed_rapid * 2 / 3;
+
+            motion_sequence_insert(NULL);   // push the built sequence in the motion core
+        }
+    }
+
+    // check for realignment
+    cmd = internal_fifo_peek_readable();            // get the currently interrupted command
+    if ( cmd )
+    {
+        if ( (cmd->cmd_type == CMD_IB_GOTO) &&                                                                                          // it was a movement command
+             (mutil_coordinates_differ( &cnc.status.inband.resume.stopped_hard_coord, &cnc.status.inband.resume.stopped_soft_coord )) ) // and internal coordinates differred from the coordinates that needed to be on the line
+        {
+            // hard coordinates are the one updated from front-end - the actual position
+            // soft coordinates are what needed to be in that moment
+            // - execute a perpendicular sequence from the hard coordinates to the line defined by the last_erased_coord and it's final coordinates
+            struct SStepCoordinates perp_coord;
+
+            internal_helper_perpendicular( &cnc.status.inband.resume.stopped_hard_coord,
+                                           &cnc.status.inband.resume.last_erased_coord, &cmd->cmd.ib_goto.coord,
+                                           &perp_coord );
+
+            seq = motion_sequence_get_fill_pointer();
+            seq->cmdID = 0;                             // no command ID with this
+            seq->seqID = IB_SEQID_REALIGN;
+            seq->seqType = SEQ_TYPE_GOTO;
+            seq->params.go_to.coord = perp_coord;
+            seq->params.go_to.feed = cmd->cmd.ib_goto.feed;
+
+            motion_sequence_insert(NULL);   // push the built sequence in the motion core
+
+        }
+    }
+
+    // push the first command from command fifo
+    internal_ib_helper_fetch_and_push_cmd();
+
+}
+
 static inline void internal_ib_helper_process_callback( struct SEventStruct *evt )
 {
     if ( cnc.status.inband.cb_operation == SEQ_TYPE_HOLD )      // hold timer
@@ -754,7 +999,7 @@ static inline void internal_ib_helper_process_callback( struct SEventStruct *evt
             {
                 cnc.status.inband.cb_operation = 0;
                 if ( cnc.status.inband.cb_op.spindle.not_callback )
-                    internal_ib_helper_start_over();
+                    internal_ib_helper_resume();                // case when internal error - and retrying ( spindle stuck or table stuck )
                 else
                     motion_sequence_confirm_inband_execution();
                 return;
@@ -786,9 +1031,9 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
         cnc.status.inband.cb_operation = SEQ_TYPE_SPINDLE;
         cnc.status.inband.cb_op.spindle.speed = cnc.status.misc.spindle_speed;
         cnc.status.inband.cb_op.spindle.retry = SEQ_MAX_MOVEMENT_RETRIALS;
-        cnc.status.inband.cb_op.spindle.timeout = 100;
-        cnc.status.inband.cb_op.spindle.not_callback = true;
-        internal_ib_helper_stop_restartable();
+        cnc.status.inband.cb_op.spindle.timeout = 100;                      // 1 second pause before trying
+        cnc.status.inband.cb_op.spindle.not_callback = true;                // this will call the start over
+        internal_ib_helper_stop_restartable( true );
         return;
     }
 
@@ -804,7 +1049,7 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
             {
                 if ( internal_procedure_coordinate_check_crt_coord( SEQ_MAX_COORDDEV_INBAND, true ) )
                 {
-                    internal_ib_helper_stop_restartable();
+                    internal_ib_helper_stop_restartable( false );
 
                     cnc.status.flags.f.err_step = 1;
                     cnc.status.inband.coord_fail += 100;     // failure ctr is decreased with 100 at each 10ms. so failure can be accumulated if problem isn't solved
@@ -821,8 +1066,8 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
                         cnc.status.inband.cb_operation = SEQ_TYPE_SPINDLE;
                         cnc.status.inband.cb_op.spindle.speed = cnc.status.misc.spindle_speed;
                         cnc.status.inband.cb_op.spindle.retry = SEQ_MAX_MOVEMENT_RETRIALS;
-                        cnc.status.inband.cb_op.spindle.timeout = 100;
-                        cnc.status.inband.cb_op.spindle.not_callback = true;
+                        cnc.status.inband.cb_op.spindle.timeout = 50;
+                        cnc.status.inband.cb_op.spindle.not_callback = true;        // this will call the start over when spindle is OK
                     }
                 }
                 else if ( cnc.status.inband.coord_fail )
@@ -848,7 +1093,7 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
 
 
 
-int internal_stop( bool leave_ob )
+int internal_stop( bool leave_ob, bool stop_spindle )
 {
     // stop motion core
     motion_sequence_stop();
@@ -863,7 +1108,7 @@ int internal_stop( bool leave_ob )
         }
 
         // spindle off - if no need for status preservation
-        if ( cnc.status.flags.f.spindle_on && (leave_ob == false) )
+        if ( cnc.status.flags.f.spindle_on && stop_spindle )
         {
             front_end_spindle_speed(0);
             front_end_sync_event_loop();
@@ -886,13 +1131,10 @@ int internal_stop( bool leave_ob )
             motion_get_crt_coord( &cnc.status.procedure.params.getcoord.coord_snapshot );
             if (internal_procedure_coordinate_check_crt_coord( 1, true ))
                 motion_set_crt_coord( &cnc.status.procedure.params.getcoord.coord_fe );
-        }   
+        }
     }
 
     // reset status
-    motion_get_crt_coord( &cnc.status.cmd.last_coord );
-    cnc.status.cmd.last_cmdID = 0;
-
     if ( leave_ob == false )
     {
         cnc.status.flags.f.run_outband = 0;
@@ -919,7 +1161,7 @@ static inline int internal_outband_reset(void)
     // send response before resetting everything
     resp.cmd_type = CMD_OB_RESET;
     resp.resp_type = RESP_ACK;
-    cmdif_confirm_reception( &resp ); 
+    cmdif_confirm_reception( &resp );
 
     HW_Wait_Reset();        // brute waiting loop for all comm. to make timeout or tx fifo to get empty
 
@@ -956,7 +1198,7 @@ static inline int internal_outband_max_speeds( struct ScmdIfCommand *cmd )
 
     if ( cmd->cmd.max_speeds.rapid > cmd->cmd.max_speeds.absolute )
         return RESP_INV;
-    if ( (cmd->cmd.max_speeds.rapid < CNC_MIN_FEED) || 
+    if ( (cmd->cmd.max_speeds.rapid < CNC_MIN_FEED) ||
          (cmd->cmd.max_speeds.absolute < CNC_MIN_FEED) )
         return RESP_INV;
 
@@ -1014,7 +1256,7 @@ static inline int internal_outband_find_origin( void )
     // If front end:
     //  - back off 450 steps on each axis until no endpoint pulse is received (clear the coarse sensor)
     //  - freerun each axis till endpoint pulse is detected - repeat this until all axis has it's signal
-    //  - set crt coord to max travel and reset front-end coordinates to max 
+    //  - set crt coord to max travel and reset front-end coordinates to max
     // Note: no table lock-up is detected here, user should prevent operational failures
     if ( cnc.status.flags.f.run_outband || cnc.status.flags.f.run_program )
         return RESP_PEN;
@@ -1028,7 +1270,7 @@ static inline int internal_outband_find_origin( void )
     {
         // set up the status of the procedure
         internal_ob_helper_setstate_started();
-    
+
         cnc.status.outband.command.cmd_type = CMD_OBSA_FIND_ORIGIN;
         cnc.status.outband.state = obstat_forg_spindledn;
         cnc.status.outband.params.findorg.axis_mask = 0x00;
@@ -1144,7 +1386,7 @@ static inline int internal_outband_freerun( struct ScmdIfCommand *cmd )
     // freerun procedure:
     //  - if possible, axis freerun is started, timeout counter reset
     //  - power is set up according to feed speed
-    //  - for runs with max travel: the measured coordinates are read back periodically from front-end 
+    //  - for runs with max travel: the measured coordinates are read back periodically from front-end
     //      if max deviation is >= SEQ_MAX_COORD_DEV_FRUN the procedure is stopped with failure and coordinates updated from readback
     //  - uppon timeout -> feed 0 is given internally
     //  -> if feed 0 is given - procedure is terminated with success if motion core stopped
@@ -1155,7 +1397,7 @@ static inline int internal_outband_freerun( struct ScmdIfCommand *cmd )
     if ( cnc.status.flags.f.run_program ||
          ( cnc.status.flags.f.run_outband && (cnc.status.outband.command.cmd_type != CMD_OBSA_FREERUN) ) )      // same outband is permitted, others not
         return RESP_PEN;
-    if ( cnc.status.flags.f.run_outband && 
+    if ( cnc.status.flags.f.run_outband &&
          (cnc.status.outband.command.cmd.frun.axis != cmd->cmd.frun.axis) )                                     // only the same axis is permitted
         return RESP_PEN;
     if ( cmd->cmd.frun.feed > cnc.setup.feed_max )                                                              // feed must be < then max alowed
@@ -1189,7 +1431,7 @@ static inline int internal_outband_spindle( struct ScmdIfCommand *cmd )
     // - powers up the spindle unit if needed
     // - sets the spindle speed
     // do some checks
-    if ( cnc.status.flags.f.run_program || cnc.status.flags.f.run_outband )      
+    if ( cnc.status.flags.f.run_program || cnc.status.flags.f.run_outband )
         return RESP_PEN;
     if ( (cmd->cmd.ib_spindle_speed > cnc.setup.spindle_max) ||
         ((cmd->cmd.ib_spindle_speed < cnc.setup.spindle_min) && (cmd->cmd.ib_spindle_speed != 0)) )
@@ -1221,12 +1463,14 @@ static inline int internal_outband_start( void )
         cnc.status.inband.cb_operation = 0;
         cnc.status.inband.mc_started = false;
         cnc.status.inband.cmd_on_hold = false;
+        cnc.status.inband.restartable = false;
         cnc.status.inband.check_coord = 0;
         cnc.status.inband.coord_fail = 0;
+        motion_get_crt_coord( &cnc.status.inband.resume.last_erased_coord );    // this is the start coordinate of the first goto/drill/arc command
     }
     else if ( cnc.status.flags.f.run_paused )       // from paused mode
     {
-        internal_ib_helper_start_over();
+        internal_ib_helper_resume();
     }
 
     // send acknowledge
@@ -1243,11 +1487,9 @@ static inline int internal_outband_pause( void )
     if ( cnc.status.flags.f.run_outband )
         return RESP_PEN;
 
-    if ( cnc.status.flags.f.run_program &&      // from stopped mode, no outband is in run
-         (cnc.status.flags.f.run_paused == 0) )
+    if ( cnc.status.flags.f.run_program )    // from stopped mode, no outband is in run
     {
-        internal_ib_helper_stop_restartable();
-        cnc.status.flags.f.run_paused = 1;
+        internal_ib_helper_stop_restartable( true );
     }
 
     // send acknowledge
@@ -1271,7 +1513,7 @@ static inline int internal_outband_stop( void )
     if ( ibElem == NULL )
         resp.resp.stop.cmdIDq = 0;
     else
-        resp.resp.stop.cmdIDq = ibElem->cmdID; 
+        resp.resp.stop.cmdIDq = ibElem->cmdID;
 
     internal_ib_helper_stop_non_restartable();
     motion_feed_scale( 0 );
@@ -1291,7 +1533,7 @@ static inline int internal_outband_stop( void )
 }
 
 
-static inline int internal_outband_scale_feed( struct ScmdIfCommand *cmd ) 
+static inline int internal_outband_scale_feed( struct ScmdIfCommand *cmd )
 {
     if ( (cmd->cmd.scale_feed > 200) || (cmd->cmd.scale_feed < -200) )
         return RESP_INV;
@@ -1303,7 +1545,7 @@ static inline int internal_outband_scale_feed( struct ScmdIfCommand *cmd )
 }
 
 
-static inline int internal_outband_scale_spindle( struct ScmdIfCommand *cmd ) 
+static inline int internal_outband_scale_spindle( struct ScmdIfCommand *cmd )
 {
     if ( (cmd->cmd.scale_spindle > 200) || (cmd->cmd.scale_spindle < -200) )
         return RESP_INV;
@@ -1369,11 +1611,11 @@ static inline int internal_outband_get_status( void )
     resp.resp_type = RESP_ACK;
     resp.resp.status.cmdIDex = motion_sequence_crt_cmdID();
     resp.resp.status.cmdIDq = (ibcmd != NULL) ? ibcmd->cmdID : 0x00;
-    resp.resp.status.freeSpace = internal_fifo_free();
+    resp.resp.status.freeSpace = internal_fifo_info_free();
 
     if ( cnc.status.flags.f.run_program &&
          (motion_sequence_check_run() == false) &&
-         (internal_fifo_usable() == 0) &&
+         (internal_fifo_info_usable() == 0) &&
          cnc.status.inband.mc_started )
         inband_empty = true;
 
@@ -1439,7 +1681,7 @@ static inline void internal_poll_ob_go_home( struct SEventStruct *evt )
                 if ( res == 1 )                                     // procedure finished with success
                 {
                     internal_ob_helper_gohome_setsequence( 1 );     //      set up sequences for home poz
-                    cnc.status.outband.state++;                     
+                    cnc.status.outband.state++;
                     break;
                 }
                 goto _error_exit;
@@ -1455,7 +1697,7 @@ static inline void internal_poll_ob_go_home( struct SEventStruct *evt )
                 if ( motion_sequence_check_run()== false )
                 {
                     // finish the command by stopping and updating everything
-                    internal_stop( false );
+                    internal_stop( false, false );
                     internal_ob_helper_setstate_succeed();
                 }
 
@@ -1464,7 +1706,7 @@ static inline void internal_poll_ob_go_home( struct SEventStruct *evt )
     }
     return;
 _error_exit:
-    internal_stop( false );                            // procedure failed
+    internal_stop( false, false );                // procedure failed
     internal_ob_helper_setstate_failed();
 }
 
@@ -1478,7 +1720,7 @@ static inline void internal_poll_ob_freerun( struct SEventStruct *evt )
         {
             // coordinate mismatch detected - steps skipped
             // stop command execution (this will update the coordinates also)
-            internal_stop(false);
+            internal_stop(false, false);
             internal_ob_helper_setstate_failed();
             if ( res == 1 )
                 cnc.status.flags.f.err_step = 1;
@@ -1492,7 +1734,7 @@ static inline void internal_poll_ob_freerun( struct SEventStruct *evt )
         if ( motion_sequence_check_run() == false )
         {
             // finish the command by stopping and updating everything
-            internal_stop(false);
+            internal_stop(false, false);
             internal_ob_helper_setstate_succeed();
             return;
         }
@@ -1550,7 +1792,7 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
         {
             internal_ob_helper_forg_search_setup( cnc.status.outband.params.findorg.axis_mask );
         }
-        else                                                            // else 
+        else                                                            // else
         {
             cnc.status.outband.state++;
             front_end_coordinate_reset_to_max();
@@ -1570,7 +1812,7 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
                 if ( res == 1 )                                     // procedure finished with success
                 {
                     internal_ob_helper_forg_backoff_setup( 0x0e );
-                    cnc.status.outband.state++;                     
+                    cnc.status.outband.state++;
                     break;
                 }
                 goto _error_exit;
@@ -1582,7 +1824,7 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
                         goto _fatal_error_exit;
                     else                                // endpoint sensor signalled
                     {
-                        uint32 tmask = 0; 
+                        uint32 tmask = 0;
                         front_end_get_touched_list( &tmask );
                         front_end_request_touch_detection( 0x0e & ~tmask );     // reuest detection for the remaining channels
                         cnc.status.outband.params.findorg.axis_mask |= tmask;
@@ -1612,8 +1854,9 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
                     else                                // front-end coordinates reset
                     {
                         motion_set_crt_coord( &cnc.setup.max_travel );
-                        internal_stop(false);
+                        internal_stop(false, false);
                         cnc.status.flags.f.stat_restarted = 0;
+                        motion_get_crt_coord( &cnc.status.cmd.last_coord );
                         internal_ob_helper_setstate_succeed();
                         return;
                     }
@@ -1628,7 +1871,7 @@ _fatal_error_exit:
     cnc.status.flags.f.err_fatal = 1;
     cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
 _error_exit:
-    internal_stop( false );                            // procedure failed
+    internal_stop( false, false );                            // procedure failed
     internal_ob_helper_setstate_failed();
 }
 
@@ -1637,7 +1880,7 @@ static inline void internal_poll_ob_findZ(  struct SEventStruct *evt )
     // check separatelly for probe touch
     if ( HW_FrontEnd_Event() && (cnc.status.outband.state == obstat_findz_search) )
     {
-        internal_stop( true );                                  // stop the run and update coordinates if mismatch
+        internal_stop( true, false );                           // stop the run and update coordinates if mismatch
         motion_get_crt_coord( &cnc.status.outband.probe.poz );  // save the pozition
         cnc.status.outband.probe.valid = true;
         // set up for home run
@@ -1661,7 +1904,7 @@ static inline void internal_poll_ob_findZ(  struct SEventStruct *evt )
                 if ( res == 1 )                                     // procedure finished with success
                 {
                     internal_ob_helper_findZ_goto_setup( 0 );
-                    cnc.status.outband.state++;                     
+                    cnc.status.outband.state++;
                     break;
                 }
                 goto _error_exit;
@@ -1685,7 +1928,7 @@ static inline void internal_poll_ob_findZ(  struct SEventStruct *evt )
     }
     return;
 _error_exit:
-    internal_stop( false );                            // procedure failed
+    internal_stop( false, false );                             // procedure failed
     internal_ob_helper_setstate_failed();
 }
 
@@ -1701,14 +1944,14 @@ static inline void internal_poll_ob_spindle( struct SEventStruct *evt )
             return;
         if ( res == 1 )                                     // procedure finished with success
         {
-            internal_ob_helper_setstate_succeed();              
+            internal_ob_helper_setstate_succeed();
             return;
         }
         goto _error_exit;
     }
     return;
 _error_exit:
-    internal_stop( false );                            // procedure failed
+    internal_stop( false, true );                           // procedure failed
     internal_ob_helper_setstate_failed();
 }
 
@@ -1719,7 +1962,7 @@ static inline void internal_poll_inband( struct SEventStruct *evt )
 
 
     if ( cnc.status.inband.cmd_on_hold == false )
-        internal_ib_helper_fetch_and_push_cmd( evt );
+        internal_ib_helper_fetch_and_push_cmd();
 
     if ( cnc.status.inband.cb_operation )
         internal_ib_helper_process_callback( evt );
@@ -1753,7 +1996,7 @@ static int internal_processcmd_inband( struct ScmdIfCommand *cmd, bool bulk )
             cmdif_confirm_reception( &resp );
             return -1;
         }
-        *pcmd = *cmd; 
+        *pcmd = *cmd;
     }
 
 
@@ -1834,7 +2077,7 @@ static int internal_processcmd_inband( struct ScmdIfCommand *cmd, bool bulk )
         resp.cmd_type = pcmd->cmd_type;
         resp.resp_type = RESP_ACK;
         resp.resp.inband.cmdID = pcmd->cmdID;
-        resp.resp.inband.Qfree = internal_fifo_free();
+        resp.resp.inband.Qfree = internal_fifo_info_free();
     }
 
     if ( bulk == false )
@@ -1940,15 +2183,15 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
                 resp.cmd_type = CMD_IB_BULK;
                 resp.resp_type = RESP_ACK;
                 resp.resp.inband.cmdID = cnc.status.cmd.last_cmdID;
-                resp.resp.inband.Qfree = internal_fifo_free();
+                resp.resp.inband.Qfree = internal_fifo_info_free();
             }
             cmdif_confirm_reception( &resp );
         }
-        else 
+        else
         {
             // command generic failure at parsing
             resp.resp_type = RESP_INV;
-            resp.cmd_type = CMD_OB_RESET; //dummy 
+            resp.cmd_type = CMD_OB_RESET; //dummy
             cmdif_confirm_reception( &resp );
         }
     }
@@ -2049,9 +2292,9 @@ void sequencer_init( bool restart )
     cnc.status.cmd.last_feed = 150;
     cnc.status.flags.f.stat_restarted = 1;
 
-    // init motion core 
+    // init motion core
     motion_set_crt_coord( &cnc.setup.max_travel );          // consider starting with maximum coordinates
-    motion_set_max_travel( &cnc.setup.max_travel ); 
+    motion_set_max_travel( &cnc.setup.max_travel );
 
     motion_pwr_ctrl( COORD_X, mpwr_auto );
     motion_pwr_ctrl( COORD_Y, mpwr_auto );
@@ -2078,4 +2321,5 @@ void sequencer_poll( struct SEventStruct *evt )
     local_poll_outbands( evt );
     local_poll_sequencer( evt );
 }
+
 

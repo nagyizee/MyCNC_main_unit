@@ -11,7 +11,7 @@
     #include "command_if.h"
 
 
-    #define CNCSEQ_CMD_FIFO_SIZE    10      // 28*32 = 1792 bytes
+    #define CNCSEQ_CMD_FIFO_SIZE    12      // 28*32 = 1792 bytes
 
     #define SEQ_FEED_PWR_HIGH       700
     #define SEQ_FEED_PWR_MED        400
@@ -127,6 +127,13 @@
         bool    not_callback;       // if true then restart needs to be done - not callback confirm
     };
 
+    struct SInbandResumeParams
+    {
+        struct SStepCoordinates     last_erased_coord;      // final coordinates of the last movement command which was erased (or the position from where start was given)
+        struct SStepCoordinates     stopped_soft_coord;     // software coordinates at the moment of stopping (may not coincide with physical coordinates in case of missed steps)
+        struct SStepCoordinates     stopped_hard_coord;     // physical coordinates at the moment of stopping
+    };
+
     struct SCommandStatus
     {
         uint8                   last_cmdID;     // last successfully introduced inband cmdID, 0 if no commands were introduced since stop/flush
@@ -147,7 +154,7 @@
             uint32 err_fatal:1;         // fatal error produced - everything halted
 
             uint32 run_outband:1;       // running an outband command 
-            uint32 run_program:1;       // running a program from inband fifo
+            uint32 run_program:1;       // running a program from inband fifo (can be combined with run_paused)
             uint32 run_paused:1;        // inband sequence paused
             uint32 run_ob_failed:1;     // set if an outband command failed - reset at new command
             uint32 run_ob_suceeded:1;   // set if an outband is finished with success - reset at new command
@@ -182,6 +189,8 @@
     {
         bool    mc_started;         // if motion core is started - it will be started when input command fifo is empty or motion sequence fifo is full
         bool    cmd_on_hold;        // set when a command needs to generate more sequences, reset when all the sequences are pushed
+        bool    restartable;        // inband execution is stopped in a restartable way
+
         uint32  cb_operation;       // callback operation executed, see CMD_IB_XXX. - 0 if none.
         union 
         {
@@ -191,6 +200,8 @@
 
         uint32  check_coord;
         uint32  coord_fail;
+
+        struct SInbandResumeParams      resume;     // resume parameters used when inband command execution is interrupted and resume is requested
     };
 
     struct SCNCProcedure

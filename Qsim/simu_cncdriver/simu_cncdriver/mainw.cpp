@@ -1,5 +1,6 @@
 
 #include <QTextBlock>
+#include <QtSerialPort/QSerialPort>
 
 #include "string.h"
 #include "mainw.h"

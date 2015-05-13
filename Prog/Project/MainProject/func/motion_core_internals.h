@@ -8,7 +8,7 @@
     #include "cnc_defs.h"
     #include "motion_core.h"
 
-    #define MAX_SEQ_FIFO       4         // 
+    #define MAX_SEQ_FIFO       5         // 
     #define MAX_STEP_FIFO      4         // 368 bytes fifo
 
     struct SMotionCoreActionCommon              // struct. size = 84

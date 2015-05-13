@@ -32,6 +32,7 @@
     {
         struct SStepCoordinates coord;      // coordinate to go to
         TFeedSpeed feed;                    // feed speed in mm/min - sequence speed
+        TFeedSpeed reserved;                // - force align to 32bit
     };
 
     // motion sequence element
@@ -133,9 +134,10 @@
 
 
     // Utility routine - it converts mm/min to steps/sec
-    TSpindleSpeed mconv_mmpm_2_sps( uint32 feed_mmpm );
+    TSpindleSpeed mutil_conv_mmpm_2_sps( uint32 feed_mmpm );
 
-
+    // Utility routine - returns true if the two coordinates are different
+    bool mutil_coordinates_differ( struct SStepCoordinates *c1, struct SStepCoordinates *c2 );
 
 
 #ifdef __cplusplus

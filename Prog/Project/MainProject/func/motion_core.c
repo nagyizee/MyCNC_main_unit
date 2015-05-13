@@ -611,8 +611,18 @@ void stepper_stop()
 {
     __disable_interrupt();
     isr.crt_action.channel_active = 0;
-    isr.stepper_fifo.c = 0;
-    isr.stepper_fifo.w = isr.stepper_fifo.r;        // preserve read pointer to be able to retreive the last executed sequence
+
+    // preserve read pointer to be able to retreive the last executed sequence
+    if ( isr.stepper_fifo.c )                           // if just stopping one in execution
+    {                                                   // advance the read pointer - to be able to retrieve the last executed sequence as this interrupted one
+        isr.stepper_fifo.c = 0;
+        isr.stepper_fifo.r++;
+        if ( isr.stepper_fifo.r == MAX_STEP_FIFO )
+            isr.stepper_fifo.r = 0;
+    }                                                   // if stop was given for a finished fifo
+                                                        // maintain the read pointer since it is advanced by the ISR or previous stop
+    isr.stepper_fifo.w = isr.stepper_fifo.r;
+
     isr.request = 0;
     isr.request_on_hold = false;
     isr.state = MCISR_STATUS_IDLE;
@@ -891,17 +901,6 @@ static inline void internal_pwr_check_and_update_status( bool tick )
 /*--------------------------
  *  Sequencer routines
  *-------------------------*/
-
-static bool internal_run_helper_coordinates_differ( struct SStepCoordinates *c1, struct SStepCoordinates *c2 )
-{
-    int i;
-    for ( i=0; i<CNC_MAX_COORDS; i++ )
-    {
-        if ( c1->coord[i] != c2->coord[i] )
-            return true;
-    }
-    return false;
-}
 
 static inline uint32 internal_run_helper_get_distance( TStepCoord val1, TStepCoord val2, uint32 *dist )
 {
@@ -1354,14 +1353,14 @@ static int internal_step_precalculator( void )
         }
 
         // check for case when sequence is of length 0
-        if ( internal_run_helper_coordinates_differ( &core.status.motion.pcoord, &crt_seq->params.go_to.coord ) == false )
+        if ( mutil_coordinates_differ( &core.status.motion.pcoord, &crt_seq->params.go_to.coord ) == false )
         {
             crt_seq->seqType = SEQ_TYPE_DUMMY;
             goto _skip;
         }
 
         if ( next_seq && (crt_seq->seqType == SEQ_TYPE_GOTO) &&
-            ( internal_run_helper_coordinates_differ( &crt_seq->params.go_to.coord, &next_seq->params.go_to.coord ) == false ))
+            ( mutil_coordinates_differ( &crt_seq->params.go_to.coord, &next_seq->params.go_to.coord ) == false ))
             next_seq->seqType = SEQ_TYPE_DUMMY;
 
         // do the precalculation
@@ -1733,9 +1732,20 @@ void motion_feed_scale( int factor )
 
 
 
-TSpindleSpeed mconv_mmpm_2_sps( uint32 feed_mmpm )
+TSpindleSpeed mutil_conv_mmpm_2_sps( uint32 feed_mmpm )
 {
     return ((TSpindleSpeed)( (feed_mmpm * STEP_MM) / 60 ));
+}
+
+bool mutil_coordinates_differ( struct SStepCoordinates *c1, struct SStepCoordinates *c2 )
+{
+    int i;
+    for ( i=0; i<CNC_MAX_COORDS; i++ )
+    {
+        if ( c1->coord[i] != c2->coord[i] )
+            return true;
+    }
+    return false;
 }
 
 
