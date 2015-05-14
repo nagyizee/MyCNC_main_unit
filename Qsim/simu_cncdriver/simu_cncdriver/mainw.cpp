@@ -268,7 +268,7 @@ void mainw::on_pb_stop_clicked()
     HW_wrp_input_line( tr("[H][C_STOP][S]") );
 }
 
-void mainw::on_pb_pause_clicked()
+void mainw::on_pb_pause_2_clicked()
 {
     HW_wrp_input_line( tr("[H][C_PAUS][S]") );
 }
@@ -336,6 +336,7 @@ void mainw::on_pb_cmd_restart_clicked()
     format.setForeground( Qt::black );
     tc.setCharFormat( format );
 }
+
 
 
 

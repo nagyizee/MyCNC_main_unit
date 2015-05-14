@@ -71,11 +71,11 @@ private slots:
 
     void on_pb_cmd_restart_clicked();
 
-    void on_pb_pause_clicked();
-
     void on_pb_get_coord_clicked();
 
     void on_pb_get_status_clicked();
+
+    void on_pb_pause_2_clicked();
 
 private:
     Ui::mainw *ui;

@@ -92,11 +92,11 @@
 [H][C_igoo][P_13,xz,100,500][S]
 
 
-#test woring sequence 2 - spindle stuck bug fixing
+#test woring sequence 2 - table stuck test
 [H][C_rest][S]
 [H][C_igoo][P_1,xyf,0,0,1500][S]
 [H][C_igoo][P_2,xyf,1000,0,600][S]
-[H][C_isps][P_3,15000][S]
+#[H][C_isps][P_3,15000][S]
 [H][C_igoo][P_4,xyf,5000,5000,300][S]
 [H][C_igoo][P_5,x,4000][S]
 [H][C_igoo][P_6,xy,5000,6000][S]
@@ -104,5 +104,16 @@
 [H][C_igoo][P_8,xy,5000,4000][S]
 [H][C_igoo][P_9,xy,4000,5000][S]
 
+#test working sequence 2 - outband inserted in pause
+#[H][C_fzzr][S]
+[H][C_stpp][P_24000,9200][S]
+[H][C_igoo][P_1,xyf,0,0,1500][S]
+[H][C_igoo][P_2,xyf,1000,0,600][S]
+[H][C_igoo][P_4,xyf,5000,5000,300][S]
+[H][C_igoo][P_5,x,4000][S]
+[H][C_igoo][P_6,xy,5000,6000][S]
+[H][C_igoo][P_7,xy,6000,5000][S]
+[H][C_igoo][P_8,xy,5000,4000][S]
+[H][C_igoo][P_9,xy,4000,5000][S]
 
 

@@ -626,6 +626,7 @@ static void iph_conv_back( double *a, struct SStepCoordinates *coord )
         else
             coord->coord[i] = (TStepCoord)(a[i]);
     }
+    coord->coord[3] = 0;
 }
 
 static void iph_substract( double *a, double *b, double *res )
@@ -731,7 +732,7 @@ static inline void internal_ib_helper_clear_finished_cmd( bool leave_last )
     {                                                   // no command from the fifo should be touched
         return;
     }
-    else if (leave_last == false)                       // sequence from a command is in run
+    else if (leave_last == false)                       // sequence from a command in run
         cnc.status.inband.restartable = false;          // - clean the restartable flag - meaning that we are finished with the restarting (if applicable)
 
     do
@@ -1213,7 +1214,7 @@ static inline int internal_outband_home_poz( struct ScmdIfCommand *cmd )
 {
     int i;
 
-    if ( cnc.status.flags.f.run_outband || cnc.status.flags.f.run_program )
+    if ( cnc.status.flags.f.run_outband )
         return RESP_PEN;
 
     for (i=0; i<CNC_MAX_COORDS; i++)
@@ -1232,7 +1233,7 @@ static inline int internal_outband_probe_poz( struct ScmdIfCommand *cmd )
 {
     int i;
 
-    if ( cnc.status.flags.f.run_outband || cnc.status.flags.f.run_program )
+    if ( cnc.status.flags.f.run_outband )
         return RESP_PEN;
 
     for (i=0; i<2; i++)
@@ -1299,7 +1300,8 @@ static inline int internal_outband_gohome( void )
     //  - z top
     //  - x,y home poz
     //  - run sequence - ch
-    if ( cnc.status.flags.f.run_outband || cnc.status.flags.f.run_program )
+    if ( cnc.status.flags.f.run_outband || 
+         (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) )
         return RESP_PEN;
 
     // set up the status of the procedure
@@ -1328,7 +1330,8 @@ static inline int internal_outband_gohome( void )
 
 static inline int internal_outband_findZzero( void )
 {
-    if ( cnc.status.flags.f.run_outband || cnc.status.flags.f.run_program )
+    if ( cnc.status.flags.f.run_outband || 
+         (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) )
         return RESP_PEN;
 
     if ( (cnc.setup.fe_present == false) || (cnc.setup.z_probe.coord[COORD_X] == -1) )
@@ -1363,7 +1366,8 @@ static inline int internal_outband_step( struct ScmdIfCommand *cmd )
     // step is a standalone simple outband with immediate action
     // no feedback is provided, stop command is recommended to detect miss step
     int i;
-    if ( cnc.status.flags.f.run_outband || cnc.status.flags.f.run_program )
+    if ( cnc.status.flags.f.run_outband || 
+         (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) )
         return RESP_PEN;
 
     for ( i=0; i<CNC_MAX_COORDS; i++ )
@@ -1394,7 +1398,7 @@ static inline int internal_outband_freerun( struct ScmdIfCommand *cmd )
     //  At finishing of procedure if more than +/-1 steps is detected, coordinates are updated
 
     // do some checks
-    if ( cnc.status.flags.f.run_program ||
+    if ( (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) ||
          ( cnc.status.flags.f.run_outband && (cnc.status.outband.command.cmd_type != CMD_OBSA_FREERUN) ) )      // same outband is permitted, others not
         return RESP_PEN;
     if ( cnc.status.flags.f.run_outband &&
@@ -1959,19 +1963,16 @@ _error_exit:
 static inline void internal_poll_inband( struct SEventStruct *evt )
 {
     // entered if run program is set
-
-
     if ( cnc.status.inband.cmd_on_hold == false )
         internal_ib_helper_fetch_and_push_cmd();
 
     if ( cnc.status.inband.cb_operation )
         internal_ib_helper_process_callback( evt );
-    else
-        internal_ib_helper_check_operation( evt );
+    else if ( cnc.status.flags.f.run_paused == 0 )
+        internal_ib_helper_check_operation( evt );          // check only if not in pause (can execute moving outbands)
 
-    if ( evt->cnc_motion_seq_finished )
+    if ( evt->cnc_motion_seq_finished && (cnc.status.flags.f.run_paused == 0) )
         internal_ib_helper_clear_finished_cmd( false );
-
 }
 
 
