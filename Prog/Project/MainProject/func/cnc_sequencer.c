@@ -733,7 +733,10 @@ static inline void internal_ib_helper_clear_finished_cmd( bool leave_last )
         return;
     }
     else if (leave_last == false)                       // sequence from a command in run
+    {
         cnc.status.inband.restartable = false;          // - clean the restartable flag - meaning that we are finished with the restarting (if applicable)
+        cnc.status.flags.f.run_recovering = 0;
+    }
 
     do
     {
@@ -845,6 +848,7 @@ static void internal_ib_helper_stop_non_restartable( void )
 
     cnc.status.flags.f.run_program = 0;
     cnc.status.flags.f.run_paused = 0;
+    cnc.status.flags.f.run_recovering = 0;
     cnc.status.inband.restartable = false;
 }
 
@@ -1035,6 +1039,7 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
         cnc.status.inband.cb_op.spindle.timeout = 100;                      // 1 second pause before trying
         cnc.status.inband.cb_op.spindle.not_callback = true;                // this will call the start over
         internal_ib_helper_stop_restartable( true );
+        cnc.status.flags.f.run_recovering = 1;
         return;
     }
 
@@ -1069,6 +1074,7 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
                         cnc.status.inband.cb_op.spindle.retry = SEQ_MAX_MOVEMENT_RETRIALS;
                         cnc.status.inband.cb_op.spindle.timeout = 50;
                         cnc.status.inband.cb_op.spindle.not_callback = true;        // this will call the start over when spindle is OK
+                        cnc.status.flags.f.run_recovering = 1;
                     }
                 }
                 else if ( cnc.status.inband.coord_fail )
@@ -1301,6 +1307,7 @@ static inline int internal_outband_gohome( void )
     //  - x,y home poz
     //  - run sequence - ch
     if ( cnc.status.flags.f.run_outband || 
+         cnc.status.flags.f.run_recovering ||
          (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) )
         return RESP_PEN;
 
@@ -1331,6 +1338,7 @@ static inline int internal_outband_gohome( void )
 static inline int internal_outband_findZzero( void )
 {
     if ( cnc.status.flags.f.run_outband || 
+         cnc.status.flags.f.run_recovering ||
          (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) )
         return RESP_PEN;
 
@@ -1367,6 +1375,7 @@ static inline int internal_outband_step( struct ScmdIfCommand *cmd )
     // no feedback is provided, stop command is recommended to detect miss step
     int i;
     if ( cnc.status.flags.f.run_outband || 
+         cnc.status.flags.f.run_recovering ||
          (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) )
         return RESP_PEN;
 
@@ -1399,6 +1408,7 @@ static inline int internal_outband_freerun( struct ScmdIfCommand *cmd )
 
     // do some checks
     if ( (cnc.status.flags.f.run_program && (cnc.status.flags.f.run_paused == 0)) ||
+         cnc.status.flags.f.run_recovering ||
          ( cnc.status.flags.f.run_outband && (cnc.status.outband.command.cmd_type != CMD_OBSA_FREERUN) ) )      // same outband is permitted, others not
         return RESP_PEN;
     if ( cnc.status.flags.f.run_outband &&
@@ -1472,7 +1482,7 @@ static inline int internal_outband_start( void )
         cnc.status.inband.coord_fail = 0;
         motion_get_crt_coord( &cnc.status.inband.resume.last_erased_coord );    // this is the start coordinate of the first goto/drill/arc command
     }
-    else if ( cnc.status.flags.f.run_paused )       // from paused mode
+    else if ( cnc.status.flags.f.run_paused && (cnc.status.flags.f.run_recovering == 0) )  // from paused mode
     {
         internal_ib_helper_resume();
     }
@@ -1489,11 +1499,14 @@ static inline int internal_outband_pause( void )
     struct ScmdIfResponse resp;
 
     if ( cnc.status.flags.f.run_outband )
-        return RESP_PEN;
-
+    {
+        internal_stop(false, true);
+    }
+    else
     if ( cnc.status.flags.f.run_program )    // from stopped mode, no outband is in run
     {
         internal_ib_helper_stop_restartable( true );
+        cnc.status.flags.f.run_recovering = 0;
     }
 
     // send acknowledge

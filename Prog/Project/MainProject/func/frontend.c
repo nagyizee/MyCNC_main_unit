@@ -605,7 +605,7 @@ _error_exit:
         if ( fe.op )
             return -1;
 
-        if ( (fe.status.spindle_rpm_set != speed) && (fe.in_use ) )
+        if ( fe.in_use )
         {
             if ( internal_command_get_events() )    // send dummy call for event clean-up
                 return -1;

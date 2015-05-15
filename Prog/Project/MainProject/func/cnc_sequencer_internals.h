@@ -156,6 +156,7 @@
             uint32 run_outband:1;       // running an outband command 
             uint32 run_program:1;       // running a program from inband fifo (can be combined with run_paused)
             uint32 run_paused:1;        // inband sequence paused
+            uint32 run_recovering:1;    // goes together with pause - set when an auto recovery is in progress - this differentiate pause by user from internal pause which can not be interrupted by outbands
             uint32 run_ob_failed:1;     // set if an outband command failed - reset at new command
             uint32 run_ob_suceeded:1;   // set if an outband is finished with success - reset at new command
 

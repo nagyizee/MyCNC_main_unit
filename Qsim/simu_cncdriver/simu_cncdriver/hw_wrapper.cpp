@@ -1644,6 +1644,12 @@ void mainw::HW_wrp_front_end_simu()
                 break;
             case SSIMU_CMD_SET_SPEED:
                 ssimu.events  &= ~( FE_EV_SPINDLE_JAM | FE_EV_SPINDLE_OK );
+                if ( ssimu.spindle_crt_speed == ssimu.spindle_set_speed )
+                {
+                    if ( ((ssimu.events & FE_EV_SPINDLE_OK) == 0) && (ssimu.evmask & FE_EV_SPINDLE_OK ) )
+                        ssimu.flag = true;
+                    ssimu.events |= FE_EV_SPINDLE_OK;
+                }
                 ssimu.resp_data[0] = 0x50;  // acknowledge
                 ssimu.resp_len = 1;
                 break;
