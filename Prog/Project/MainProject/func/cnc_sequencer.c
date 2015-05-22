@@ -38,6 +38,26 @@
  *      - See them described at each internal_outband_xxxx routine
  *
  *
+ *  LED meanings:
+ *       leds:        (R)   (G1)   (G2)
+ *       operations:   O - constant on,   X - off,   B - blink slow,  b - blink fast     
+ *  
+ *       LED_SYSTEM
+ *       (G2)  - X - system off
+ *               B - system starts up (after reset)
+ *               O - system OK
+ *
+ *       LED_PROCESSING
+ *       (G1)  - X - standby, stopped
+ *               B - program paused / waiting
+ *               b - running a sequence
+ * 
+ *       LED_FAILURE     
+ *       (R)   - X - no fault
+ *               B - general fault (even for table and spindle stuck)
+ *               b - intermitent fault - trying to repare it
+ *               O - system crash ( BAD THING )
+ *
  */
 
 
@@ -66,14 +86,6 @@ static void internal_helper_set_power( int axis, uint32 feed )
 
     motion_pwr_ctrl( axis, pwr );
 }
-
-
-
-
-
-
-
-
 
 
 void internal_fifo_flush(void)
@@ -224,6 +236,7 @@ static int internal_procedure_coordinate_check_poll( struct SEventStruct *evt )
         {
             cnc.status.flags.f.err_fatal = 1;
             cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
+            LED_Op( LED_FAILURE, LED_blink_slow );
             return -1;
         }
         else
@@ -297,6 +310,7 @@ static int internal_procedure_spindle_poll( struct SEventStruct *evt )
             {
                 cnc.status.flags.f.err_fatal = 1;
                 cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
+                LED_Op( LED_FAILURE, LED_blink_slow );
             }
             else
                 cnc.status.flags.f.err_spjam = 1;
@@ -407,6 +421,8 @@ static void internal_ob_helper_gohome_setsequence( int seq_start )
     seq.params.go_to.coord = cnc.setup.home_poz;
     motion_sequence_insert( &seq );
     motion_sequence_start();
+
+    LED_Op( LED_PROCESSING, LED_blink_fast );
 }
 
 static void internal_ob_helper_forg_backoff_setup(uint32 ax_mask)
@@ -433,6 +449,7 @@ static void internal_ob_helper_forg_backoff_setup(uint32 ax_mask)
 
     motion_sequence_insert( &seq );
     motion_sequence_start();
+    LED_Op( LED_PROCESSING, LED_blink_fast );
 
     // set up front end for endpoint touch detection
     if ( front_end_check_op_busy() )
@@ -498,6 +515,7 @@ static void internal_ob_helper_findZ_goto_setup( int sequence )
 
     motion_sequence_insert( &seq );
     motion_sequence_start();
+    LED_Op( LED_PROCESSING, LED_blink_fast );
 }
 
 static int internal_ob_helper_check_skipped_step( struct SEventStruct *evt, uint32 outband )
@@ -524,6 +542,7 @@ static int internal_ob_helper_check_skipped_step( struct SEventStruct *evt, uint
                 {
                     cnc.status.flags.f.err_code = GENFAULT_TABLE_STUCK;
                     cnc.status.flags.f.err_fatal = 1;
+                    LED_Op( LED_FAILURE, LED_blink_slow );
                     return -1;
                 }
                 // stop everything - but maintain procedure status
@@ -598,12 +617,16 @@ static void internal_ob_helper_setstate_succeed(void)
 {
     cnc.status.flags.f.run_outband = 0;
     cnc.status.flags.f.run_ob_suceeded = 1;
+    if ( cnc.status.flags.f.run_paused )
+        LED_Op( LED_PROCESSING, LED_blink_slow );
 }
 
 static void internal_ob_helper_setstate_failed(void)
 {
     cnc.status.flags.f.run_outband = 0;
     cnc.status.flags.f.run_ob_failed = 1;
+    if ( cnc.status.flags.f.run_paused )
+        LED_Op( LED_PROCESSING, LED_blink_slow );
 }
 
 
@@ -736,7 +759,13 @@ static inline void internal_ib_helper_clear_finished_cmd( bool leave_last )
     {
         cnc.status.inband.restartable = false;          // - clean the restartable flag - meaning that we are finished with the restarting (if applicable)
         cnc.status.flags.f.run_recovering = 0;
+        LED_Op( LED_FAILURE, LED_off );
     }
+
+    if ( motion_sequence_check_run() )
+        LED_Op( LED_PROCESSING, LED_blink_fast );
+    else
+        LED_Op( LED_PROCESSING, LED_off );
 
     do
     {
@@ -815,6 +844,9 @@ static inline void internal_ib_helper_fetch_and_push_cmd( void )
                     }
                     motion_sequence_insert(NULL);   // push the built sequence in the motion core
                     internal_fifo_pull();           // pull out the currently processed command
+
+                    if ( motion_sequence_check_run() )
+                        LED_Op( LED_PROCESSING, LED_blink_fast );
                 }
                 else
                     to_start = true;                // start when sequence fifo is full
@@ -833,6 +865,8 @@ static inline void internal_ib_helper_fetch_and_push_cmd( void )
         cnc.status.inband.mc_started = true;
         cnc.status.inband.check_coord = SEQ_PERIOD_COORD_CHK_OUTBAND;
         motion_sequence_start();
+        if ( motion_sequence_check_run() )
+            LED_Op( LED_PROCESSING, LED_blink_fast );
     }
 }
 
@@ -1006,7 +1040,9 @@ static inline void internal_ib_helper_process_callback( struct SEventStruct *evt
                 if ( cnc.status.inband.cb_op.spindle.not_callback )
                     internal_ib_helper_resume();                // case when internal error - and retrying ( spindle stuck or table stuck )
                 else
+                {
                     motion_sequence_confirm_inband_execution();
+                }
                 return;
             }
             // error handling
@@ -1018,6 +1054,7 @@ static inline void internal_ib_helper_process_callback( struct SEventStruct *evt
                     cnc.status.flags.f.err_code = GENFAULT_SPINDLE_STUCK;
                 cnc.status.flags.f.err_fatal = 1;
 
+                LED_Op( LED_FAILURE, LED_blink_slow );
                 internal_ib_helper_stop_non_restartable();
             }
             else
@@ -1039,7 +1076,9 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
         cnc.status.inband.cb_op.spindle.timeout = 100;                      // 1 second pause before trying
         cnc.status.inband.cb_op.spindle.not_callback = true;                // this will call the start over
         internal_ib_helper_stop_restartable( true );
+        LED_Op( LED_FAILURE, LED_blink_fast );
         cnc.status.flags.f.run_recovering = 1;
+        cnc.status.flags.f.err_spjam = 1;
         return;
     }
 
@@ -1064,6 +1103,7 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
                         // if restart failed X times - halt everything
                         cnc.status.flags.f.err_code = GENFAULT_TABLE_STUCK;
                         cnc.status.flags.f.err_fatal = 1;
+                        LED_Op( LED_FAILURE, LED_blink_slow );
                         internal_ib_helper_stop_non_restartable();
                     }
                     else
@@ -1075,6 +1115,7 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
                         cnc.status.inband.cb_op.spindle.timeout = 50;
                         cnc.status.inband.cb_op.spindle.not_callback = true;        // this will call the start over when spindle is OK
                         cnc.status.flags.f.run_recovering = 1;
+                        LED_Op( LED_FAILURE, LED_blink_fast );
                     }
                 }
                 else if ( cnc.status.inband.coord_fail )
@@ -1104,6 +1145,7 @@ int internal_stop( bool leave_ob, bool stop_spindle )
 {
     // stop motion core
     motion_sequence_stop();
+    LED_Op( LED_PROCESSING, LED_off );
 
     if ( (cnc.status.flags.f.err_fatal == 0) || (cnc.status.flags.f.err_code != GENFAULT_FRONT_END) )
     {
@@ -1132,6 +1174,7 @@ int internal_stop( bool leave_ob, bool stop_spindle )
         {
             cnc.status.flags.f.err_fatal = 1;
             cnc.status.flags.f.err_code  = GENFAULT_FRONT_END;
+            LED_Op( LED_FAILURE, LED_blink_slow );
         }
         else
         {
@@ -1160,6 +1203,21 @@ int internal_stop( bool leave_ob, bool stop_spindle )
     return 0;
 }
 
+
+static void internal_cmd_pause(void)
+{
+    if ( cnc.status.flags.f.run_outband )
+    {
+        internal_stop(false, true);
+    }
+    else
+    if ( cnc.status.flags.f.run_program )    // from stopped mode, no outband is in run
+    {
+        internal_ib_helper_stop_restartable( true );
+        LED_Op( LED_PROCESSING, LED_blink_slow );
+        cnc.status.flags.f.run_recovering = 0;
+    }
+}
 
 static inline int internal_outband_reset(void)
 {
@@ -1272,6 +1330,7 @@ static inline int internal_outband_find_origin( void )
     if ( cnc.setup.fe_present == false )
     {
         cnc.status.cmd.last_coord = cnc.setup.max_travel;
+        LED_Op( LED_SYSTEM, LED_on );
     }
     else
     {
@@ -1298,7 +1357,7 @@ static inline int internal_outband_find_origin( void )
 }
 
 
-static inline int internal_outband_gohome( void )
+static inline int internal_outband_gohome( bool response )
 {
     // bring the milling head in home/tool change position
     // stop the spindle if needed
@@ -1328,10 +1387,13 @@ static inline int internal_outband_gohome( void )
         internal_ob_helper_gohome_setsequence( 1 );
     }
 
-    // send acknowledge
-    cnc.status.outband.command.cmd_type = CMD_OBSA_GO_HOME;
-    internal_send_simple_ack( &cnc.status.outband.command );
-    return RESP_ACK;
+    if ( response )
+    {
+        // send acknowledge
+        cnc.status.outband.command.cmd_type = CMD_OBSA_GO_HOME;
+        internal_send_simple_ack( &cnc.status.outband.command );
+        return RESP_ACK;
+    }
 }
 
 
@@ -1498,16 +1560,7 @@ static inline int internal_outband_pause( void )
 {
     struct ScmdIfResponse resp;
 
-    if ( cnc.status.flags.f.run_outband )
-    {
-        internal_stop(false, true);
-    }
-    else
-    if ( cnc.status.flags.f.run_program )    // from stopped mode, no outband is in run
-    {
-        internal_ib_helper_stop_restartable( true );
-        cnc.status.flags.f.run_recovering = 0;
-    }
+    internal_cmd_pause();
 
     // send acknowledge
     resp.cmd_type = CMD_OB_PAUSE;
@@ -1543,6 +1596,9 @@ static inline int internal_outband_stop( void )
         cnc.status.flags.f.err_code = 0;
         cnc.status.flags.f.err_fatal = 0;
     }
+
+    if ( cnc.status.flags.f.err_fatal == 0 )
+        LED_Op( LED_FAILURE, LED_off );
 
     resp.resp.stop.cmdIDex = motion_sequence_crt_cmdID();
     cmdif_confirm_reception(&resp);
@@ -1873,6 +1929,7 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
                         motion_set_crt_coord( &cnc.setup.max_travel );
                         internal_stop(false, false);
                         cnc.status.flags.f.stat_restarted = 0;
+                        LED_Op( LED_SYSTEM, LED_on );
                         motion_get_crt_coord( &cnc.status.cmd.last_coord );
                         internal_ob_helper_setstate_succeed();
                         return;
@@ -1887,6 +1944,7 @@ static inline void internal_poll_ob_find_org( struct SEventStruct *evt )
 _fatal_error_exit:
     cnc.status.flags.f.err_fatal = 1;
     cnc.status.flags.f.err_code = GENFAULT_FRONT_END;
+    LED_Op( LED_FAILURE, LED_blink_slow );
 _error_exit:
     internal_stop( false, false );                            // procedure failed
     internal_ob_helper_setstate_failed();
@@ -2122,7 +2180,7 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
             case CMD_OBSA_SETUP_HOME_POZ:       res = internal_outband_home_poz( cmd ); break;
             case CMD_OBSA_SETUP_PROBE_POZ:      res = internal_outband_probe_poz( cmd ); break;
             case CMD_OBSA_FIND_ORIGIN:          res = internal_outband_find_origin(); break;
-            case CMD_OBSA_GO_HOME:              res = internal_outband_gohome(); break;
+            case CMD_OBSA_GO_HOME:              res = internal_outband_gohome( true ); break;
             case CMD_OBSA_FIND_Z_ZERO:          res = internal_outband_findZzero(); break;
             case CMD_OBSA_STEP:                 res = internal_outband_step( cmd ); break;
             case CMD_OBSA_FREERUN:              res = internal_outband_freerun( cmd ); break;
@@ -2209,6 +2267,51 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
             cmdif_confirm_reception( &resp );
         }
     }
+
+    // process buttons
+    if ( evt->button_pressed_emerg || evt->button_pressed_resume || evt->internal_outband_gohome )
+    {
+        if ( evt->button_pressed_emerg )
+        {
+            if ( cnc.status.flags.f.run_paused == 0 )
+                internal_cmd_pause();
+            else
+            {
+                internal_ib_helper_stop_non_restartable();
+                motion_feed_scale( 0 );
+                cnc.status.misc.spindle_speed = 0;
+
+                if ( cnc.status.flags.f.err_fatal &&
+                    ((cnc.status.flags.f.err_code == GENFAULT_SPINDLE_STUCK) ||
+                     (cnc.status.flags.f.err_code == GENFAULT_TABLE_STUCK))    )
+                {
+                    cnc.status.flags.f.err_code = 0;
+                    cnc.status.flags.f.err_fatal = 0;
+                }
+
+                if ( cnc.status.flags.f.err_fatal == 0 )
+                    LED_Op( LED_FAILURE, LED_off );
+            }
+        }
+        else if ( evt->button_pressed_resume )
+        {
+            if ( cnc.status.flags.f.run_paused &&
+                 cnc.status.inband.restartable &&
+                (cnc.status.flags.f.run_recovering == 0) )
+            {
+                internal_ib_helper_resume();
+            }
+        }
+        else if ( evt->internal_outband_gohome )
+        {
+            if ( (cnc.status.flags.f.run_paused && (cnc.status.flags.f.run_recovering == 0)) ||
+                 (cnc.status.flags.f.run_program == 0) )
+            {
+                internal_outband_gohome( false );
+            }
+        }
+    }
+
 }
 
 
@@ -2317,6 +2420,10 @@ void sequencer_init( bool restart )
 
     // register inband callback
     motion_sequence_register_callback( seq_callback_process_inband );
+
+    LED_Op( LED_SYSTEM, LED_blink_slow );
+    LED_Op( LED_PROCESSING, LED_off );
+    LED_Op( LED_FAILURE, LED_off );
 
     // notify master
     resp.resp_type = RESP_RST;

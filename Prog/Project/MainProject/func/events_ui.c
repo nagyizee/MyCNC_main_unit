@@ -114,7 +114,7 @@ void Process_Button( struct SEventStruct *ev )
     }
     if ( !(prew_state & BUTTON_TOOLCH) && BtnGet_Home() )
     {
-        ev->button_pressed_toolchange = 1;
+        ev->internal_outband_gohome = 1;
         prew_state |= BUTTON_TOOLCH;
     }
     else if ( (prew_state & BUTTON_TOOLCH) && !BtnGet_Home() )
@@ -156,31 +156,8 @@ struct SEventStruct Event_Poll(void)
 {
     struct SEventStruct evtemp = { 0, };
 
-    // process main communication port events
-/*old
-    uint32  ev;
- *  ev = Uart_GetFlag( PORT_COM );
-
-    if ( ev & UART_FLAG_EVENT_CHAR )
-    {
-        evtemp.comm_new_request = 1;
-    }
-    if ( ev & UART_FLAG_ERR_HW_OVERFLOW )
-    {
-        Uart_Send( PORT_COM, ">E: uart_hw_overflow\n\r");
-        evtemp.comm_error_in_full   = 1;
-    }
-    if ( ev & UART_FLAG_ERR_SW_OVERFLOW )
-    {
-        Uart_Send( PORT_COM, ">E: uart_buff_overflow\n\r");
-        evtemp.comm_error_in_full   = 1;
-    }
-
-    Uart_ClearFlag( PORT_COM, UART_FLAG_EVENT_CHAR | UART_FLAG_ERR_SW_OVERFLOW | UART_FLAG_ERR_HW_OVERFLOW );
-*/
-
     // process separately the emergency button - if pressed take the event immediately
-    if ( events.emerg_button && BtnGet_Emerg() )
+    if ( ((ButtOp.prew_state & BUTTON_EMERG) == 0) && BtnGet_Emerg() )
     {
         events.button_pressed_emerg = 1;
         ButtOp.countdown = 0;

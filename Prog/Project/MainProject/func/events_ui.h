@@ -29,10 +29,9 @@
         uint32  cnc_motion_seq_fatal:1;     // fatal error produced in sequence execution (like out of boundaries or impossible speed setup error)
         uint32  cnc_motion_seq_finished:1;  // ISR finished executing a sequence
 
-        uint32  emerg_button:1;             // emergency button pressed - button state
         uint32  button_pressed_emerg:1;     // emergency button pressed - refresh - instant
         uint32  button_pressed_resume:1;
-        uint32  button_pressed_toolchange:1;
+        uint32  internal_outband_gohome:1;
 
         uint32  fe_spindle_jam:1;           // flag set by front_end_poll when spindle jam is detected
         uint32  fe_op_completed:1;          // flag set by front_end_poll when an operation is finished - set for succeeded and failed also

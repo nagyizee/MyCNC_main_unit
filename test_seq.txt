@@ -105,8 +105,8 @@
 [H][C_igoo][P_9,xy,4000,5000][S]
 
 #test working sequence 2 - outband inserted in pause
-#[H][C_fzzr][S]
 [H][C_stpp][P_24000,9200][S]
+#[H][C_fzzr][S]
 [H][C_igoo][P_1,xyf,0,0,1500][S]
 [H][C_igoo][P_2,xyf,1000,0,600][S]
 [H][C_igoo][P_4,xyf,5000,5000,300][S]
@@ -124,4 +124,7 @@
 [H][C_igoo][P_5,xy,40000,11000][S]
 [H][C_igoo][P_6,xy,45000,10000][S]
 [H][C_igoo][P_7,xy,40000,9000][S]
+
+
+        
 

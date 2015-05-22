@@ -61,7 +61,7 @@
     <widget class="QRadioButton" name="rb_led1">
      <property name="geometry">
       <rect>
-       <x>44</x>
+       <x>190</x>
        <y>20</y>
        <width>16</width>
        <height>17</height>
@@ -103,7 +103,7 @@
     <widget class="QRadioButton" name="rb_led3">
      <property name="geometry">
       <rect>
-       <x>185</x>
+       <x>40</x>
        <y>20</y>
        <width>16</width>
        <height>17</height>
