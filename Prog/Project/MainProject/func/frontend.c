@@ -50,12 +50,18 @@ static int internal_cmd_response_poll( bool tick100us )
         {
             fe.opstat.timeout_ctr--;
             if ( fe.opstat.timeout_ctr == 0 )
+            {
                 req_retry = true;
+                if ( fe.status.stats.msg_tout < 0xffff )
+                    fe.status.stats.msg_tout++;
+            }
         }
     }
     else if (res == COMMFE_NAK)
     {
         req_retry = true;
+        if ( fe.status.stats.msg_rej < 0xffff )
+            fe.status.stats.msg_rej++;
     }
     else
     {
@@ -70,6 +76,9 @@ static int internal_cmd_response_poll( bool tick100us )
             // retry the message
             internal_cmd_send();
             fe.opstat.retries--;
+            if ( fe.status.stats.msg_retry < 0xffff )
+                fe.status.stats.msg_retry++;
+
         }
         else
         {
@@ -788,6 +797,17 @@ _error_exit:
             return res;
         }
         return -1;
+    }
+
+
+    void front_end_get_stats( uint32 *timeout, uint32 *rejected, uint32 *retried )
+    {
+        *timeout = fe.status.stats.msg_tout;
+        *rejected = fe.status.stats.msg_rej;
+        *retried = fe.status.stats.msg_retry;
+        fe.status.stats.msg_tout = 0;
+        fe.status.stats.msg_rej = 0;
+        fe.status.stats.msg_retry = 0;
     }
 
 

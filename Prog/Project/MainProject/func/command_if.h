@@ -85,13 +85,18 @@
     #define GENFAULT_TABLE_STUCK    0x01        // retried n times recover missing steps - no success
     #define GENFAULT_SPINDLE_STUCK  0x02        // retried n times recover spindle speed - no success
     #define GENFAULT_FRONT_END      0x03        // broken link with the front-end ( repeated timeout or data transfer failures )
-                                                
+    #define GENFAULT_INTERNAL       0x04        // internal error, calculation crash, fifo mess-up, etc.
 
     // command type definition:
     // setup commands
-    #define CMD_OB_RESET                    0x55    // resets everything from fresh start state. Setup is needed after it. Overrides other standalone commands
-                                                    // IN:      [0xAA][0x00][cksum]
+    #define CMD_OB_RESET                    0x50    // resets everything from fresh start state. Setup is needed after it. Overrides other standalone commands
+                                                    // IN:      [0xAA][0x50][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted and reset is started
+
+    #define CMD_OB_GET_STATS                0x51    // get statistics since the start-up or last statistics command
+                                                    // IN:      [0xAA][0x51][cksum]
+                                                    // OUT:     [ACK][0x9C] - [stats response 28 bytes] - [cksum]
+                                                    //          see struct SCmdResp_stats
 
     #define CMD_OBSA_SETUP_MAX_TRAVEL       0x01    // set the maximum travels on each axis 
                                                     // sets the current cordinates also - recommended to call it when machine is at the absolute max. pozition 
@@ -355,6 +360,24 @@
         uint32  Qfree;          // free space in the inband queue
     };
 
+    struct SCmdResp_stats
+    {
+        uint16  hb_crt;
+        uint16  hb_max;
+        uint16  hb_min;
+        uint16  cnc_tstuck;
+        uint16  cnc_spstuck;
+        uint16  comm_ovf;
+        uint16  comm_ckrej;
+        uint16  comm_conrej;
+        uint16  comm_tout;
+        uint16  fe_tout;
+        uint16  fe_rej;
+        uint16  fe_retry;
+        uint16  mc_starv;
+        uint16  reserved;
+    };
+
     struct SCmdResp_stop
     {
         uint32  cmdIDex;        // command ID in execution which was interrupted
@@ -417,6 +440,7 @@
             struct SCmdResp_status      status;
             struct SStepCoordinates     touch;
             struct SCmdResp_inband      inband;     // response to inbands
+            struct SCmdResp_stats       stats;
         }       resp;           // valid for RESP_AKC only
     };
 
@@ -440,7 +464,10 @@
     // Get inbands from bulk, since inbands can be transmitted in bulk, call this routine till it returns -1
     // returns 0 on success, -1 if no more inbands in bulk
     int cmdif_get_bulk( struct ScmdIfCommand *command );
-    
+
+    // get communication statistics since start-up or from last call
+    void cmdif_get_stats( uint32 *overflow, uint32 *cksum_err, uint32 *cons_error, uint32 *timeout );
+
 
 #ifdef __cplusplus
     }

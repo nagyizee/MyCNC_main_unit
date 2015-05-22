@@ -45,6 +45,7 @@ static int internal_check_command( uint32 cmd_id, uint32 cmd_len, bool check_ib 
     switch ( cmd_id )
     {
         case CMD_OB_RESET:
+        case CMD_OB_GET_STATS:
         case CMD_OBSA_FIND_ORIGIN:
         case CMD_OBSA_GO_HOME:
         case CMD_OBSA_FIND_Z_ZERO:
@@ -350,6 +351,34 @@ static int internal_sr_generic_2_bytes( uint8 ack, uint8 param )
     return -1;
 }
 
+static int intenal_sr_ack_stats( struct ScmdIfResponse *response )
+{
+    // [ACK][0x9C] - [stats response  28 bytes] - [cksum]
+    uint8 cksum = (uint8)(COMMCKSUMSTART);
+    uint8 *data;
+    int i;
+
+    if ( comm_cmd_GetOutFree() < 31 )
+        return -1;
+
+    comm_wrChar( RESP_ACK );
+    comm_wrChar( 0x9C );
+    internal_add_out_cksum( &cksum, 0x9C );
+
+    response->resp.stats.reserved = 0xffff;
+
+    data = (uint8*)(&response->resp.stats);
+
+    for (i=0; i<0x1C; i++)
+    {
+        comm_wrChar(data[i]);
+        internal_add_out_cksum( &cksum, data[i] );
+    }
+
+    comm_wrChar( cksum );
+    return 0;
+}
+
 static int internal_sr_ack_cmdID( uint8 cmdID )
 {
     // [ACK][0x81][cmdID][cksum]
@@ -511,6 +540,7 @@ static int internal_parse_command( uint32 cmd_id, uint8 *buffer, uint32 plen, st
     switch ( cmd_id )
     {
         case CMD_OB_RESET:              res = 0; break;
+        case CMD_OB_GET_STATS:          res = 0; break;
         case CMD_OBSA_SETUP_MAX_TRAVEL: res = internal_pc_setup_max_travel( command ); break;
         case CMD_OBSA_SETUP_MAX_SPEEDS: res = internal_pc_setup_max_speed( command ); break;
         case CMD_OBSA_SETUP_HOME_POZ:   res = internal_pc_setup_home_poz( command ); break;
@@ -549,6 +579,9 @@ static int internal_send_response( struct ScmdIfResponse *response )
         case RESP_ACK:
             switch ( response->cmd_type )
             {
+                case CMD_OB_GET_STATS:
+                    res = intenal_sr_ack_stats( response );
+                    break;
                 case CMD_OB_PAUSE: 
                 case CMD_OB_GET_CRT_CMD_ID:           
                     res = internal_sr_ack_cmdID( response->resp.cmdID );
@@ -659,6 +692,9 @@ void cmdif_poll( struct SEventStruct *evt )
             internal_command_flush();
             evt->comm_input_overflow = 1;
             internal_respond_byte( RESP_OVF );
+
+            if ( comm.stats.overflow < 0xffff )
+                comm.stats.overflow++;
         }
 
         if ( comm.state == CSTATE_CMD_TO_GET )
@@ -770,6 +806,9 @@ void cmdif_poll( struct SEventStruct *evt )
                         {
                             // checksum error:
                             internal_respond_byte( RESP_NAK );
+                            if ( comm.stats.cksum_rej < 0xffff )
+                                comm.stats.cksum_rej++;
+
                             return;
                         }
                         else
@@ -778,6 +817,8 @@ void cmdif_poll( struct SEventStruct *evt )
                             {
                                 // if command is invalid
                                 internal_respond_byte( RESP_NAK );
+                                if ( comm.stats.cons_rej < 0xffff )
+                                    comm.stats.cons_rej++;
                                 return;
                             }
                             else
@@ -810,6 +851,8 @@ void cmdif_poll( struct SEventStruct *evt )
                     comm.state          = CSTATE_WAIT_HEADER;
                     comm.reject_rest    = 0;
                     evt->comm_timeout   = 1;
+                    if ( comm.stats.timeout < 0xffff )
+                        comm.stats.timeout++;
                     return;
                 }
             }
@@ -881,4 +924,16 @@ int cmdif_get_bulk( struct ScmdIfCommand *command )
     return -1;
 }
 
+
+void cmdif_get_stats( uint32 *overflow, uint32 *cksum_err, uint32 *cons_error, uint32 *timeout )
+{
+    *overflow = comm.stats.overflow;
+    *cksum_err = comm.stats.cksum_rej;
+    *cons_error = comm.stats.cons_rej;
+    *timeout = comm.stats.timeout;
+    comm.stats.overflow = 0;
+    comm.stats.cksum_rej = 0;
+    comm.stats.cons_rej = 0;
+    comm.stats.timeout = 0;
+}
 

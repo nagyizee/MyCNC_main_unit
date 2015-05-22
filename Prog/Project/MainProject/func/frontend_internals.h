@@ -31,6 +31,13 @@
         feop_spindle_set_rpm,   // set spindle speed in progress
     };
 
+    struct statistics
+    {
+        uint16  msg_tout;       // count of time out detections
+        uint16  msg_rej;        // count of messages rejected by front-end (NAK) 
+        uint16  msg_retry;      // count of message resend trials
+        uint16  reserved;
+    };
 
     struct SFrontEndStatus
     {
@@ -42,6 +49,8 @@
         struct SStepCoordinates     coord;
 
         uint32  touch_mask;
+
+        struct  statistics          stats;
     };
 
 

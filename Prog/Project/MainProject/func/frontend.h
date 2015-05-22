@@ -103,6 +103,9 @@
     // generic and debug
     // ------------------------------------------
 
+    // returns stats from the start-up or last get_stats call
+    void front_end_get_stats( uint32 *timeout, uint32 *rejected, uint32 *retried );
+    
     // get the event and endpoint sensor list: evt[0] - list of events, evt[1] - list of endpoints + probe
     // evt must have 2 bytes
     // Sync op.

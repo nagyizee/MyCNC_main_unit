@@ -536,7 +536,10 @@ static int internal_ob_helper_check_skipped_step( struct SEventStruct *evt, uint
             if ( internal_procedure_coordinate_check_crt_coord(SEQ_MAX_COORDDEV_OUTBAND, false) )
             {
                 // missed step detected
+                if ( cnc.status.misc.stats_tstuck < 0xffff )
+                    cnc.status.misc.stats_tstuck++;
                 cnc.status.flags.f.err_step = 1;
+
                 (*mfail) += 100;     // failure ctr is decreased with 100 at each 10ms. so failure can be accumulated if problem isn't solved
                 if ( (*mfail) > (SEQ_MAX_MOVEMENT_RETRIALS * 100) )
                 {
@@ -1046,12 +1049,17 @@ static inline void internal_ib_helper_process_callback( struct SEventStruct *evt
                 return;
             }
             // error handling
+            if ( cnc.status.misc.stats_spstuck < 0xffff )
+                cnc.status.misc.stats_spstuck++;
             cnc.status.inband.cb_op.spindle.retry --;
+
             if ( (cnc.status.inband.cb_op.spindle.retry == 0) ||    // retried X times, no success
                  (cnc.status.flags.f.err_fatal) )
             {
                 if ( cnc.status.flags.f.err_fatal == 0 )
+                {
                     cnc.status.flags.f.err_code = GENFAULT_SPINDLE_STUCK;
+                }
                 cnc.status.flags.f.err_fatal = 1;
 
                 LED_Op( LED_FAILURE, LED_blink_slow );
@@ -1079,6 +1087,8 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
         LED_Op( LED_FAILURE, LED_blink_fast );
         cnc.status.flags.f.run_recovering = 1;
         cnc.status.flags.f.err_spjam = 1;
+        if ( cnc.status.misc.stats_spstuck < 0xffff )
+            cnc.status.misc.stats_spstuck++;
         return;
     }
 
@@ -1095,8 +1105,10 @@ static inline void internal_ib_helper_check_operation( struct SEventStruct *evt 
                 if ( internal_procedure_coordinate_check_crt_coord( SEQ_MAX_COORDDEV_INBAND, true ) )
                 {
                     internal_ib_helper_stop_restartable( false );
-
+                    if ( cnc.status.misc.stats_tstuck < 0xffff )
+                        cnc.status.misc.stats_tstuck++;
                     cnc.status.flags.f.err_step = 1;
+
                     cnc.status.inband.coord_fail += 100;     // failure ctr is decreased with 100 at each 10ms. so failure can be accumulated if problem isn't solved
                     if ( cnc.status.inband.coord_fail > (SEQ_MAX_MOVEMENT_RETRIALS * 100) )
                     {
@@ -1232,6 +1244,33 @@ static inline int internal_outband_reset(void)
 
     sequencer_init(true);
 
+    return RESP_ACK;
+}
+
+static inline int internal_outband_get_stats(void)
+{
+    struct ScmdIfResponse resp;
+
+    resp.cmd_type = CMD_OB_GET_STATS;
+    resp.resp_type = RESP_ACK;
+
+    resp.resp.stats.hb_crt = cnc.status.misc.hb_crt;
+    resp.resp.stats.hb_max = cnc.status.misc.hb_max;
+    resp.resp.stats.hb_min = cnc.status.misc.hb_min;
+    cnc.status.misc.hb_crt = 0;
+    cnc.status.misc.hb_max = 0;
+    cnc.status.misc.hb_min = 0xffff;
+
+    resp.resp.stats.cnc_tstuck = cnc.status.misc.stats_tstuck;
+    resp.resp.stats.cnc_spstuck = cnc.status.misc.stats_spstuck;
+    cnc.status.misc.stats_tstuck = 0;
+    cnc.status.misc.stats_spstuck = 0;
+
+    cmdif_get_stats( &resp.resp.stats.comm_ovf, &resp.resp.stats.comm_ckrej, &resp.resp.stats.comm_conrej, &resp.resp.stats.comm_tout );
+    front_end_get_stats( &resp.resp.stats.fe_tout, &resp.resp.stats.fe_rej, &resp.resp.stats.fe_retry );
+    resp.resp.stats.mc_starv = motion_stats_starved();
+
+    cmdif_confirm_reception(&resp);
     return RESP_ACK;
 }
 
@@ -2165,6 +2204,7 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
 
     if ( cnc.status.flags.f.err_fatal &&
          ((cmd->cmd_type != CMD_OB_RESET) &&
+          (cmd->cmd_type != CMD_OB_GET_STATS) &&
           (cmd->cmd_type != CMD_OB_STOP) &&
           (cmd->cmd_type != CMD_OB_GET_STATUS)) )
     {
@@ -2175,6 +2215,7 @@ static inline void internal_processcmd_outband( struct ScmdIfCommand *cmd )
         switch ( cmd->cmd_type )
         {
             case CMD_OB_RESET:                  res = internal_outband_reset(); break;
+            case CMD_OB_GET_STATS:              res = internal_outband_get_stats(); break;
             case CMD_OBSA_SETUP_MAX_TRAVEL:     res = internal_outband_max_travel( cmd ); break;
             case CMD_OBSA_SETUP_MAX_SPEEDS:     res = internal_outband_max_speeds( cmd ); break;
             case CMD_OBSA_SETUP_HOME_POZ:       res = internal_outband_home_poz( cmd ); break;
@@ -2269,7 +2310,7 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
     }
 
     // process buttons
-    if ( evt->button_pressed_emerg || evt->button_pressed_resume || evt->internal_outband_gohome )
+    if ( evt->button_pressed_emerg || evt->button_pressed_resume || evt->internal_outband_gohome || evt->cnc_motion_seq_fatal )
     {
         if ( evt->button_pressed_emerg )
         {
@@ -2310,8 +2351,16 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
                 internal_outband_gohome( false );
             }
         }
-    }
 
+        if ( evt->cnc_motion_seq_fatal )        // fatal internal error from motion core
+        {
+            internal_ib_helper_stop_non_restartable();
+            LED_Op( LED_FAILURE, LED_blink_slow );
+            cnc.status.flags.f.err_fatal = 1;
+            cnc.status.flags.f.err_code = GENFAULT_INTERNAL;
+        }
+
+    }
 }
 
 
@@ -2334,14 +2383,29 @@ static inline void local_poll_outbands( struct SEventStruct *evt )
 
 static inline void local_poll_sequencer( struct SEventStruct *evt )
 {
+    cnc.status.misc.hb_ctr++;
+
     // check for coordinate dump
-    if ( evt->timer_tick_10ms && cnc.status.misc.coord_dump_ctr )
+    if ( evt->timer_tick_10ms )
     {
-        cnc.status.misc.coord_dump_ctr--;
-        if ( cnc.status.misc.coord_dump_ctr == 0 )
+        if ( cnc.status.misc.hb_ctr > 0xffff )
+            cnc.status.misc.hb_ctr = 0xffff;
+
+        if ( cnc.status.misc.hb_ctr > cnc.status.misc.hb_max )
+            cnc.status.misc.hb_max = cnc.status.misc.hb_ctr;
+        if ( cnc.status.misc.hb_ctr < cnc.status.misc.hb_min )
+            cnc.status.misc.hb_min = cnc.status.misc.hb_ctr;
+        cnc.status.misc.hb_crt = cnc.status.misc.hb_ctr;
+        cnc.status.misc.hb_ctr = 0;
+
+        if ( cnc.status.misc.coord_dump_ctr )
         {
-            cnc.status.misc.coord_dump_ctr = 10;
-            internal_ob_helper_send_coordinates( RESP_DMP );
+            cnc.status.misc.coord_dump_ctr--;
+            if ( cnc.status.misc.coord_dump_ctr == 0 )
+            {
+                cnc.status.misc.coord_dump_ctr = 10;
+                internal_ob_helper_send_coordinates( RESP_DMP );
+            }
         }
     }
 
@@ -2408,6 +2472,8 @@ void sequencer_init( bool restart )
     cnc.status.cmd.last_coord = cnc.setup.max_travel;
     cnc.status.cmd.last_feed = 150;
     cnc.status.flags.f.stat_restarted = 1;
+
+    cnc.status.misc.hb_min = 0xffff;
 
     // init motion core
     motion_set_crt_coord( &cnc.setup.max_travel );          // consider starting with maximum coordinates

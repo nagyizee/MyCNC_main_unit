@@ -218,8 +218,14 @@
 
     struct SCNCMisc
     {
-        uint32 spindle_speed;                           // speed set by inband or outband (not scaled) - Note: this doesn't reflect the ON status
-        uint32 coord_dump_ctr;                          // coordinate dump period. set to 0 to disable dump
+        uint32 coord_dump_ctr;                  // coordinate dump period. set to 0 to disable dump
+        uint16 spindle_speed;                   // speed set by inband or outband (not scaled) - Note: this doesn't reflect the ON status
+        uint16 stats_tstuck;                    // table stuck counter
+        uint16 stats_spstuck;                   // spindle stuck counter
+        uint16 hb_crt;
+        uint16 hb_min;
+        uint16 hb_max;
+        uint32 hb_ctr;                          // heartbeat counter - counts the main loop execution in 10ms interval
     };
 
     struct SCNCStatus

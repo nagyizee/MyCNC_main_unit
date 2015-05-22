@@ -124,6 +124,8 @@
 
         motion_sequence_callback inband_cb;     // callback for inband execution
         bool                     inband_ex;     // inband in execution, sequencer is in hold
+
+        uint32                   stats_starved; // starvation counter
     };
 
 

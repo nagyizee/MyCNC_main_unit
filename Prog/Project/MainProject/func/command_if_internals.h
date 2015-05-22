@@ -18,6 +18,16 @@
 
     #define COMMREC_TIMEOUT     10          // 1ms timeout in data reception
 
+
+    struct SCommifStats
+    {
+        uint16  overflow;                   // input buffer overflow count
+        uint16  cksum_rej;                  // checksum missmatch count
+        uint16  cons_rej;                   // message consistency error reject
+        uint16  timeout;                    // message time out count
+    };
+
+
     struct SCommandInterFaceInternals
     {
         uint32  state;
@@ -33,6 +43,8 @@
         uint8   is_bulk;            // mark that the command received is a bulk one - special readout is needed
 
         uint32  bulk_poz;           // pozition in bulk payload buffer. max value is p_len
+
+        struct SCommifStats  stats; // statistics
     };
 
 

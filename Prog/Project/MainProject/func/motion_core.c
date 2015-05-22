@@ -1490,6 +1490,8 @@ static void internal_sequencer_poll( struct SEventStruct *evt )
         if ( internal_sequence_fifo_fullness() )
         {
             evt->cnc_motion_warn_starving = 1;
+            if ( core.status.stats_starved < 0xffff )
+                core.status.stats_starved++;
         }
     }
 
@@ -1728,6 +1730,14 @@ void motion_feed_scale( int factor )
         core.status.motion.scale_crt = factor;
         stepper_scale_factor( factor );
     }
+}
+
+
+uint32 motion_stats_starved( void )
+{
+    uint32 val = core.status.stats_starved;
+    core.status.stats_starved = 0;
+    return val;
 }
 
 

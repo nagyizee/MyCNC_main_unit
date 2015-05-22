@@ -714,6 +714,7 @@ uint32 comm_wrChar( uint8 byte )
  *                                     C_xxx        P_xxx
  *  command list - ( xxx ):
  *    - CMD_OBSA_RESET:                 "rest"
+ *    - CMD_OB_GET_STATS:               "gstt"
  *    - CMD_OBSA_SETUP_MAX_TRAVEL:      "stmt"      <x>,<y>,<z>,<a>                 ex:   [H][C_stmt][P_1200,3400,600,800][S]
  *    - CMD_OBSA_SETUP_MAX_SPEEDS:      "stms"      <max>,<rapid>
  *    - CMD_OBSA_SETUP_HOME_POZ:        "sthm"      <x>,<y>,<z>,<a>
@@ -1249,6 +1250,8 @@ int mainw::HW_wrp_input_line(QString line)
 
                 if ( strncmp(token+3, "rest", 4 ) == 0 )
                     cmd_type = CMD_OB_RESET;
+                else if ( strncmp(token+3, "gstt", 4 ) == 0 )
+                    cmd_type = CMD_OB_GET_STATS;
                 else if ( strncmp(token+3, "stmt", 4 ) == 0 )
                     cmd_type = CMD_OBSA_SETUP_MAX_TRAVEL;
                 else if ( strncmp(token+3, "stms", 4 ) == 0 )

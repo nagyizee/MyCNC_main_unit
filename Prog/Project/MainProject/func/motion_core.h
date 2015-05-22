@@ -132,6 +132,10 @@
     // it applies the factor in progressive way, no need to wait for it
     void motion_feed_scale( int factor );
 
+    // returns the starvation nr. (max 0xffff) since the start-up or last stats call
+    uint32 motion_stats_starved( void );
+
+
 
     // Utility routine - it converts mm/min to steps/sec
     TSpindleSpeed mutil_conv_mmpm_2_sps( uint32 feed_mmpm );
