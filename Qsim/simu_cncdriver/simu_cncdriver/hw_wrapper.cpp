@@ -1162,8 +1162,10 @@ int local_parse_ib_drill( char *chunk, uint8 *outdata, int *out_ptr )
 }
 
 
-int mainw::HW_wrp_insert_message( unsigned char *buffer, int size, bool from_master )
+int mainw::HW_wrp_insert_message( unsigned char *buffer, int size, int tx_type )
 {
+    // txtype: 0 - from the cnc device, 1 - from the master, 2 - generic message
+
     QTextCharFormat format;
     QString msg;
     QTextCursor tc(doc_comm_log);
@@ -1176,7 +1178,12 @@ int mainw::HW_wrp_insert_message( unsigned char *buffer, int size, bool from_mas
     if ( sb->value() == sb->maximum() )
         move_to_bottom = true;
 
-    if ( from_master)
+    if ( tx_type == 2)
+    {
+        format.setForeground( Qt::darkGray );
+        msg.append( tr("\n") + tr("-- ") );
+    }
+    else if ( tx_type == 1)
     {
         format.setForeground( Qt::red );
         msg.append( tr("\n") + tr("S> ") );
@@ -1191,16 +1198,23 @@ int mainw::HW_wrp_insert_message( unsigned char *buffer, int size, bool from_mas
     tc.movePosition( QTextCursor::End );
     tc.setCharFormat( format );
 
-    for ( ptr = 0; ptr < size; ptr++ )
+    if ( tx_type == 2)
     {
-        if ( ((ptr % 8) == 0) && (ptr != 0) && (ptr % 16) )
-            sprintf( str, "| %02x ", buffer[ptr]);
-        else
-            sprintf( str, "%02x ", buffer[ptr]);
+        msg.append( (char *)buffer );
+    }
+    else
+    {
+        for ( ptr = 0; ptr < size; ptr++ )
+        {
+            if ( ((ptr % 8) == 0) && (ptr != 0) && (ptr % 16) )
+                sprintf( str, "| %02x ", buffer[ptr]);
+            else
+                sprintf( str, "%02x ", buffer[ptr]);
 
-        if ( (ptr != 0) && ((ptr % 16) == 0) )
-            msg.append( tr("\n") + tr("   ")  );
-        msg.append( str );
+            if ( (ptr != 0) && ((ptr % 16) == 0) )
+                msg.append( tr("\n") + tr("   ")  );
+            msg.append( str );
+        }
     }
 
     tc.insertText( msg );
@@ -1408,13 +1422,19 @@ int mainw::HW_wrp_input_line(QString line)
             break;
     }
 
-    // outdata, out_ptr - are ready to be used
-    if ( fifo_free_space( &comm_rx.simu_feed ) < out_ptr )
+    return HW_wrp_inject_command( outdata, out_ptr );
+}
+
+
+int mainw::HW_wrp_inject_command( unsigned char *outdata, int size )
+{
+
+    if ( fifo_free_space( &comm_rx.simu_feed ) < size )
         return -2;
-    fifo_push_bulk( &comm_rx.simu_feed, outdata, out_ptr );
+    fifo_push_bulk( &comm_rx.simu_feed, outdata, size );
 
     // insert the message
-    HW_wrp_insert_message( outdata, out_ptr, true );
+    HW_wrp_insert_message( outdata, size, true );
     return 0;
 }
 
@@ -1432,7 +1452,8 @@ int mainw::HW_wrp_simu_datafeed()
     // get response
     if ( comm_rx.resp_ct )
     {
-        HW_wrp_insert_message( comm_rx.resp, comm_rx.resp_ct, false );
+        HW_wrp_insert_message( comm_rx.resp, comm_rx.resp_ct, 0 );
+
 
         if ( (commwait_getcoord && (comm_rx.resp[0] == RESP_ACK)) || (comm_rx.resp[0] == RESP_DMP) )
         {

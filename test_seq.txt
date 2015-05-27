@@ -66,6 +66,9 @@
 #get status
 [H][C_gsts][S]
 
+#get statistics
+[H][C_gstt][S]
+
 #get coordinates
 [H][C_gcrd][S]
 [H][C_gcrd][P_1][S]

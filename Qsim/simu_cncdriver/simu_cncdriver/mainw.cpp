@@ -83,6 +83,10 @@ mainw::mainw(QWidget *parent) :
     connect(ticktimer, SIGNAL(timeout()), this, SLOT(TimerTick()));
     ticktimer->start( TIMER_INTERVAL );
 
+    comm = new QTcpServer(this);
+    connect(comm, SIGNAL(newConnection()), SLOT(tcp_newConnection()));
+    comm->listen(QHostAddress::Any, 4444);
+
     //--- test phase
     qsrand(0x64892354);
     main_entry( NULL );
@@ -95,6 +99,48 @@ mainw::~mainw()
 }
 
 
+
+void mainw::tcp_newConnection()
+{
+    while (comm->hasPendingConnections())
+    {
+        client = comm->nextPendingConnection();
+        connect(client, SIGNAL(readyRead()), this, SLOT(tcp_readyRead()));
+        connect(client, SIGNAL(disconnected()), this, SLOT(tcp_disconnected()));
+        HW_wrp_insert_message( (unsigned char*)"client connected", 0, 2 );
+    }
+}
+
+void mainw::tcp_disconnected()
+{
+    client = NULL;
+    HW_wrp_insert_message( (unsigned char*)"client disconnected", 0, 2 );
+}
+
+void mainw::tcp_readyRead()
+{
+    int len;
+    QByteArray buffer;
+    while( 1 )
+    {
+        len = client->bytesAvailable();
+        if ( len == 0 )
+            break;
+
+        buffer.append( client->read(len) );
+    }
+
+    HW_wrp_inject_command( (unsigned char*)buffer.data(), buffer.size() );
+}
+
+void mainw::tcp_Send(unsigned char *buffer, int length)
+{
+    if ( client )
+    {
+        client->write((char*)buffer, length);
+        client->flush();
+    }
+}
 
 /////////////////////////////////////////////////////////////
 //  Main app. simulation

@@ -6,6 +6,8 @@
 #include <QGraphicsPixmapItem>
 #include <QPixmap>
 #include <QTimer>
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
 
 
 #define DISPSIM_MAX_W      1300
@@ -80,6 +82,8 @@ private slots:
 private:
     Ui::mainw *ui;
     QTimer *ticktimer;
+    QTcpServer *comm;
+    QTcpSocket *client;
     bool buttons[3];
 
     QGraphicsScene *scene_xy;
@@ -98,6 +102,13 @@ private:
     QTextDocument *doc_commands;
     QTextDocument *doc_comm_log;
 
+
+private slots:
+    void tcp_newConnection();
+    void tcp_disconnected();
+    void tcp_readyRead();
+private:
+    void tcp_Send(unsigned char *buffer, int length);
 
 public:
 
@@ -132,8 +143,9 @@ private:
     void HW_wrp_stop();
     void HW_wrp_set_speedFactor( int factor );
 
-    int HW_wrp_insert_message( unsigned char *buffer, int size, bool tx );
+    int HW_wrp_insert_message( unsigned char *buffer, int size, int tx_type );
     int HW_wrp_input_line(QString line);
+    int HW_wrp_inject_command( unsigned char *outdata, int size );
     int HW_wrp_simu_datafeed();
 
 
