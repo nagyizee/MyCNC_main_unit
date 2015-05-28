@@ -798,7 +798,7 @@ void cmdif_poll( struct SEventStruct *evt )
                         {
                             // command didn't fit in input fifo - notify overflow
                             comm.reject_rest = 0;
-                            internal_respond_byte( RESP_OVF );
+                            internal_respond_byte( RESP_NAK );
                             return;
                         }
 

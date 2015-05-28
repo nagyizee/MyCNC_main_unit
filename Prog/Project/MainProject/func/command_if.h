@@ -37,7 +37,7 @@
     //                       1bit  8bit
     //              
     //              [ pl ]  - if payload is presend. It is 0 for inband batch response
-    //              [ len ] - payload lenght M if [ pl ] is 1;   free cmd fifo space if [ pl ] is 0
+    //              [ len ] - payload lenght M if [ pl ] is 1;   free cmd fifo space if [ pl ] is 0.  This includes the checksum also
     //              [ data ] - present only if [ pl ] is 1;
     //              [ cksum ] - present only if [ pl ] is 1;    calculated from [ pl ][ len ] till [data(M-1)]
     // 

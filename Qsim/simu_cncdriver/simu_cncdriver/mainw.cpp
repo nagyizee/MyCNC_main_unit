@@ -83,6 +83,7 @@ mainw::mainw(QWidget *parent) :
     connect(ticktimer, SIGNAL(timeout()), this, SLOT(TimerTick()));
     ticktimer->start( TIMER_INTERVAL );
 
+    client = NULL;
     comm = new QTcpServer(this);
     connect(comm, SIGNAL(newConnection()), SLOT(tcp_newConnection()));
     comm->listen(QHostAddress::Any, 4444);

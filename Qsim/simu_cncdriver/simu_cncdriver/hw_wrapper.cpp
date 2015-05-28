@@ -1453,7 +1453,7 @@ int mainw::HW_wrp_simu_datafeed()
     if ( comm_rx.resp_ct )
     {
         HW_wrp_insert_message( comm_rx.resp, comm_rx.resp_ct, 0 );
-
+        tcp_Send( (unsigned char*)comm_rx.resp, comm_rx.resp_ct );
 
         if ( (commwait_getcoord && (comm_rx.resp[0] == RESP_ACK)) || (comm_rx.resp[0] == RESP_DMP) )
         {
