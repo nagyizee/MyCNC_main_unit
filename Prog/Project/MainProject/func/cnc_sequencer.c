@@ -1732,32 +1732,43 @@ static inline int internal_outband_get_status( void )
         inband_empty = true;
 
     // prepare status byte
+    resp.resp.status.status_byte.b = 0x00;
     if ( cnc.status.flags.f.run_outband )
-        resp.resp.status.status_byte = 0x03;        //  cc = 11
+        resp.resp.status.status_byte.f.outband_op = 0x03;        //  cc = 11
     else if ( cnc.status.flags.f.run_ob_failed )
-        resp.resp.status.status_byte = 0x01;        //  cc = 01
+        resp.resp.status.status_byte.f.outband_op = 0x01;        //  cc = 01
     else
-        resp.resp.status.status_byte = 0x00;        //  cc = 00
+        resp.resp.status.status_byte.f.outband_op = 0x00;        //  cc = 00
 
-    resp.resp.status.status_byte |= cnc.status.flags.f.run_program ? (1 << 2) : 0x00;       // r
-    resp.resp.status.status_byte |= cnc.status.flags.f.run_paused ? (1 << 3) : 0x00;        // p
-    resp.resp.status.status_byte |= cnc.status.flags.f.stat_bpress ? (1 << 4) : 0x00;       // B
-    resp.resp.status.status_byte |= cnc.status.flags.f.stat_restarted ? (1 << 5) : 0x00;    // I
-    resp.resp.status.status_byte |= inband_empty ? (1 << 6) : 0x00;                         // e
+    if ( cnc.status.flags.f.run_program )
+        resp.resp.status.status_byte.f.running = 1;              // r
+    if ( cnc.status.flags.f.run_paused )
+        resp.resp.status.status_byte.f.paused = 1;               // p
+    if ( cnc.status.flags.f.stat_bpress )
+        resp.resp.status.status_byte.f.button = 1;               // B
+    if ( cnc.status.flags.f.stat_restarted )
+        resp.resp.status.status_byte.f.initial = 1;              // I
+    if ( inband_empty )
+        resp.resp.status.status_byte.f.end_ib = 1;               // e
 
     // prepare failure byte
-    resp.resp.status.fail_byte  = cnc.status.flags.f.err_code & 0x0f;
-    resp.resp.status.fail_byte |= cnc.status.flags.f.err_starv ? (1 << 4) : 0x00;           // s
-    resp.resp.status.fail_byte |= cnc.status.flags.f.err_step ? (1 << 5) : 0x00;            // F
-    resp.resp.status.fail_byte |= cnc.status.flags.f.err_spjam ? (1 << 6) : 0x00;           // S
-    resp.resp.status.fail_byte |= cnc.status.flags.f.err_fatal ? (1 << 7) : 0x00;           // G
+    resp.resp.status.fail_byte.b = 0x00;
+    resp.resp.status.fail_byte.f.faultcode = cnc.status.flags.f.err_code & 0x0f;
+    if ( cnc.status.flags.f.err_starv )
+        resp.resp.status.fail_byte.f.starv = 1;                  // s
+    if ( cnc.status.flags.f.err_step )
+        resp.resp.status.fail_byte.f.tstuck = 1;                 // F
+    if ( cnc.status.flags.f.err_spjam )
+        resp.resp.status.fail_byte.f.sstuck = 1;                 // S
+    if ( cnc.status.flags.f.err_fatal )
+        resp.resp.status.fail_byte.f.genfault = 1;               // G
 
     // reset flags
     cnc.status.flags.f.stat_bpress = 0;
     cnc.status.flags.f.err_starv = 0;
     cnc.status.flags.f.err_step = 0;
     cnc.status.flags.f.err_spjam = 0;
-
+    
     cmdif_confirm_reception(&resp);
     return RESP_ACK;
 }
@@ -2315,7 +2326,10 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
         if ( evt->button_pressed_emerg )
         {
             if ( cnc.status.flags.f.run_paused == 0 )
+            {
                 internal_cmd_pause();
+                cnc.status.flags.f.stat_bpress = 1;
+            }
             else
             {
                 internal_ib_helper_stop_non_restartable();
@@ -2332,6 +2346,8 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
 
                 if ( cnc.status.flags.f.err_fatal == 0 )
                     LED_Op( LED_FAILURE, LED_off );
+
+                cnc.status.flags.f.stat_bpress = 1;
             }
         }
         else if ( evt->button_pressed_resume )
@@ -2341,6 +2357,7 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
                 (cnc.status.flags.f.run_recovering == 0) )
             {
                 internal_ib_helper_resume();
+                cnc.status.flags.f.stat_bpress = 1;
             }
         }
         else if ( evt->internal_outband_gohome )
@@ -2349,6 +2366,7 @@ static inline void local_sequencer_process_command( struct SEventStruct *evt )
                  (cnc.status.flags.f.run_program == 0) )
             {
                 internal_outband_gohome( false );
+                cnc.status.flags.f.stat_bpress = 1;
             }
         }
 

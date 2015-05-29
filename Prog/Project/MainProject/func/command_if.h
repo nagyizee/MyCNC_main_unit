@@ -394,9 +394,32 @@
 
     struct SCmdResp_status
     {
+        union
+        {   struct
+            {
+                uint8  outband_op:2;        // cc
+                uint8  running:1;           // r
+                uint8  paused:1;            // p
+                uint8  button:1;            // B
+                uint8  initial:1;           // I
+                uint8  end_ib:1;            // e
+                uint8  reserved:1;
+            } f;
+            uint8 b;
+        } status_byte;
 
-        uint8   status_byte;
-        uint8   fail_byte;
+        union
+        {   struct
+            {
+                uint8  faultcode:4;         // gggg
+                uint8  starv:1;             // s
+                uint8  tstuck:1;            // F
+                uint8  sstuck:1;            // S
+                uint8  genfault:1;          // G
+            } f;
+            uint8 b;
+        } fail_byte;
+
         uint8   cmdIDex;                        // command ID currently in execution
         uint8   cmdIDq;                         // last command ID in queue
 

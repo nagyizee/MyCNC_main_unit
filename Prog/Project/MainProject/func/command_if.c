@@ -468,10 +468,10 @@ static inline int internal_sr_ack_status( struct ScmdIfResponse *response )
     comm_wrChar( 0x85 );
     internal_add_out_cksum( &cksum, 0x85 );
 
-    comm_wrChar( response->resp.status.status_byte );
-    internal_add_out_cksum( &cksum, response->resp.status.status_byte );
-    comm_wrChar( response->resp.status.fail_byte );
-    internal_add_out_cksum( &cksum, response->resp.status.fail_byte );
+    comm_wrChar( response->resp.status.status_byte.b );
+    internal_add_out_cksum( &cksum, response->resp.status.status_byte.b );
+    comm_wrChar( response->resp.status.fail_byte.b );
+    internal_add_out_cksum( &cksum, response->resp.status.fail_byte.b );
     comm_wrChar( (uint8)response->resp.status.freeSpace );
     internal_add_out_cksum( &cksum, (uint8)response->resp.status.freeSpace );
     comm_wrChar( response->resp.status.cmdIDex );
