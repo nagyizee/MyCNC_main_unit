@@ -88,7 +88,7 @@
     #define GENFAULT_INTERNAL       0x04        // internal error, calculation crash, fifo mess-up, etc.
 
     // command type definition:
-    // setup commands
+    // system and debug commands
     #define CMD_OB_RESET                    0x50    // resets everything from fresh start state. Setup is needed after it. Overrides other standalone commands
                                                     // IN:      [0xAA][0x50][cksum]
                                                     // OUT:     [ACK][0x00] - if accepted and reset is started
@@ -98,6 +98,7 @@
                                                     // OUT:     [ACK][0x9C] - [stats response 28 bytes] - [cksum]
                                                     //          see struct SCmdResp_stats
 
+    // setup commands:
     #define CMD_OBSA_SETUP_MAX_TRAVEL       0x01    // set the maximum travels on each axis 
                                                     // sets the current cordinates also - recommended to call it when machine is at the absolute max. pozition 
                                                     // (defaults are 130x46x80x360)
@@ -235,7 +236,7 @@
                                                     //         - currently executed (or stopped) cmdID 
                                                     //         - command fifo free space
                                                     // IN:      [0xAA][0x33][cksum]
-                                                    // OUT:     [ACK][0x85][ eIB  prcc][GSFs gggg][freesp][cmdIDex][cmdIDq][cksum]
+                                                    // OUT:     [ACK][0x85][XeIB  prcc][GSFs gggg][freesp][cmdIDex][cmdIDq][cksum]
                                                     // 
                                                     //              cc -  00 - no outband operation in execution, or last one succeeded
                                                     //                    01 - last outband operation failed
@@ -246,6 +247,7 @@
                                                     //              B  - button press changed running status -> read the cc, r, p to discover what happened
                                                     //              I  - initial status - marking a fresh reset. cleared when CMD_OBSA_FIND_ORIGIN is executed
                                                     //              e  - end of run but in started state (inband fifo empty)
+                                                    //              X  - front end present
                                                     // 
                                                     //              s  - starvation detected
                                                     //              F  - coordinate fault detected (missed steps) - trying to fix it (hopefully - otherwise general failure)
@@ -403,7 +405,7 @@
                 uint8  button:1;            // B
                 uint8  initial:1;           // I
                 uint8  end_ib:1;            // e
-                uint8  reserved:1;
+                uint8  frontend:1;          // X
             } f;
             uint8 b;
         } status_byte;

@@ -1750,6 +1750,8 @@ static inline int internal_outband_get_status( void )
         resp.resp.status.status_byte.f.initial = 1;              // I
     if ( inband_empty )
         resp.resp.status.status_byte.f.end_ib = 1;               // e
+    if ( cnc.setup.fe_present  )
+        resp.resp.status.status_byte.f.frontend = 1;             // X
 
     // prepare failure byte
     resp.resp.status.fail_byte.b = 0x00;
